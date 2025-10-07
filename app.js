@@ -1,6 +1,6 @@
-/* Lift Runner — v2.4 (mobile arcade completo)
- * - D-pad fisso nel canvas: ← → hold, ↑/↓ tap, A=LIFT, B=TURBO (hold)
- * - Start overlay, Pausa (P/HUD), iPhone-friendly (pointer + touchAction:none)
+/* Lift Runner — v2.6 (D-pad DOM fuori dal gioco)
+ * - D-pad DOM inserito via JS tra canvas e HUD: ← → hold, ↑/↓ tap, A=LIFT, B=TURBO (hold)
+ * - Start overlay, Pausa, iPhone-friendly (pointer + touchAction:none)
  * - Lift UP/DOWN + auto-lift (150ms)
  * - Suoni WebAudio (sbloccati al primo input)
  * - Punteggio: tempo + sorpassi + lift; Best score su localStorage
@@ -16,12 +16,13 @@
   const scoreEl = document.getElementById('score');
   const liftBtn = document.getElementById('liftBtn');
   const pauseBtn= document.getElementById('pauseBtn');
+  const wrap    = document.getElementById('gamewrap');
 
   // iPhone: blocca gesture/zoom
   canvas.style.touchAction = 'none';
 
   // Focus tastiera su desktop
-  canvas.tabIndex = 0; 
+  canvas.tabIndex = 0;
   const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
   window.addEventListener('load', focusCanvas);
   canvas.addEventListener('pointerdown', focusCanvas);
@@ -49,14 +50,14 @@
   // ===== Audio (WebAudio) =====
   let actx=null, muted=false;
   const ensureAudio=()=>{ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch{} } };
-  const blip=(f=660, d=0.07, g=0.08, type='square')=>{
+  const blip=(f=660, d=0.07, g=0.10, type='square')=>{
     if(muted || !actx) return; const t=actx.currentTime;
     const o=actx.createOscillator(), v=actx.createGain();
     o.type=type; o.frequency.setValueAtTime(f,t);
     v.gain.setValueAtTime(g,t); v.gain.linearRampToValueAtTime(0.0001,t+d);
     o.connect(v).connect(actx.destination); o.start(t); o.stop(t+d);
   };
-  const sweep=(f0=420,f1=920,d=0.22,g=0.06)=>{
+  const sweep=(f0=420,f1=920,d=0.22,g=0.08)=>{
     if(muted || !actx) return; const t=actx.currentTime;
     const o=actx.createOscillator(), v=actx.createGain();
     o.type='sawtooth'; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+d);
@@ -68,7 +69,7 @@
     const b=actx.createBuffer(1, actx.sampleRate*0.25, actx.sampleRate);
     const data=b.getChannelData(0); for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,2);
     const s=actx.createBufferSource(); const v=actx.createGain();
-    v.gain.value=0.15; v.gain.exponentialRampToValueAtTime(0.0001,t+0.25);
+    v.gain.value=0.20; v.gain.exponentialRampToValueAtTime(0.0001,t+0.25);
     s.buffer=b; s.connect(v).connect(actx.destination); s.start(t);
   };
   ['pointerdown','keydown','touchstart','click'].forEach(t=>{
@@ -126,35 +127,92 @@
     if(c==='Space') { player.turboOn=false; blip(260,0.05,0.05,'triangle'); }
   },{passive:false});
 
-  if(liftBtn)  liftBtn.addEventListener('click', ()=>{ manualLift(); if(!running) startGame(); });
-  if(pauseBtn) pauseBtn.addEventListener('click', togglePause);
+  if(liftBtn)  liftBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); manualLift(); if(!running) startGame(); });
+  if(pauseBtn) pauseBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); togglePause(); });
 
-  // ===== GamePad (canvas) =====
-  const PAD = {
-    up:   { x: 24+56,    y: H-88-56, w:56, h:56, flash:0 },
-    down: { x: 24+56,    y: H-88+56, w:56, h:56, flash:0 },
-    left: { x: 24,       y: H-88,    w:56, h:56, hold:false },
-    right:{ x: 24+112,   y: H-88,    w:56, h:56, hold:false },
-    A:    { x: W-52-52,  y: H-88,    w:52, h:52, hold:false, flash:0, label:'A' },
-    B:    { x: W-52,     y: H-120,   w:52, h:52, hold:false, flash:0, label:'B' }
-  };
-  function hit(pt,b){ return pt.x>=b.x && pt.x<=b.x+b.w && pt.y>=b.y && pt.y<=b.y+b.h; }
-  function ptFrom(ev){ const r=canvas.getBoundingClientRect(), sx=canvas.width/r.width, sy=canvas.height/r.height; return { x:(ev.clientX-r.left)*sx, y:(ev.clientY-r.top)*sy }; }
-  const releaseHolds=()=>{ PAD.left.hold=PAD.right.hold=PAD.A.hold=PAD.B.hold=false; };
+  // ===== D-pad DOM (fuori dal canvas) =====
+  let holdLeft=false, holdRight=false, holdTurbo=false;  // stati hold dei bottoni
+  createPadDOM();
 
-  canvas.addEventListener('pointerdown',e=>{
-    e.preventDefault(); if(!running) startGame();
-    const p=ptFrom(e);
-    if(hit(p,PAD.left)) { PAD.left.hold=true; return; }
-    if(hit(p,PAD.right)){ PAD.right.hold=true; return; }
-    if(hit(p,PAD.up))   { laneUp(); PAD.up.flash=performance.now()+120; blip(760,0.05,0.06); return; }
-    if(hit(p,PAD.down)) { laneDown(); PAD.down.flash=performance.now()+120; blip(540,0.05,0.06); return; }
-    if(hit(p,PAD.A))    { PAD.A.hold=true; PAD.A.flash=performance.now()+120; manualLift(); return; }
-    if(hit(p,PAD.B))    { PAD.B.hold=true; PAD.B.flash=performance.now()+120; player.turboOn=true; blip(460,0.04,0.06,'triangle'); return; }
-  },{passive:false});
-  canvas.addEventListener('pointerup',   e=>{ e.preventDefault(); if(PAD.B.hold){ player.turboOn=false; blip(260,0.05,0.05,'triangle'); } releaseHolds(); }, {passive:false});
-  canvas.addEventListener('pointerleave',e=>{ e.preventDefault(); if(PAD.B.hold){ player.turboOn=false; } releaseHolds(); }, {passive:false});
-  canvas.addEventListener('pointercancel',e=>{ e.preventDefault(); if(PAD.B.hold){ player.turboOn=false; } releaseHolds(); }, {passive:false});
+  function createPadDOM(){
+    if (!wrap) return;
+
+    // stile via <style> iniettato
+    const css = document.createElement('style');
+    css.textContent = `
+      #padBar{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;background:#0d1330;border-top:1px solid #1d2a55}
+      .padCluster{display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px;gap:8px}
+      .padBtn{appearance:none;-webkit-appearance:none;user-select:none;touch-action:manipulation;cursor:pointer;
+              width:56px;height:56px;border-radius:12px;border:1.5px solid #2dd4bf;background:#1a2755;color:#e6f7ff;
+              font:700 20px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;display:flex;align-items:center;justify-content:center}
+      .padBtn:active{background:#1c8c7a;border-color:#54e0c2;transform:translateY(1px)}
+      .padBtn.small{width:52px;height:52px}
+      .padCluster .spacer{visibility:hidden}
+      .padRight{display:grid;grid-auto-flow:row;gap:8px}
+      .padLabel{display:block;font:600 11px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#9fb0d9;margin-top:2px}
+      @media (min-width: 880px){ #padBar{padding:12px 16px} .padBtn{width:60px;height:60px} .padCluster{grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px} }
+    `;
+    document.head.appendChild(css);
+
+    // struttura DOM
+    const bar = document.createElement('div');
+    bar.id = 'padBar';
+
+    const left = document.createElement('div');
+    left.className = 'padCluster';
+    left.innerHTML = `
+      <button class="padBtn spacer" tabindex="-1">·</button>
+      <button id="padUp" class="padBtn" aria-label="Su">↑</button>
+      <button class="padBtn spacer" tabindex="-1">·</button>
+      <button id="padLeft" class="padBtn" aria-label="Sinistra">←</button>
+      <button id="padDown" class="padBtn" aria-label="Giù">↓</button>
+      <button id="padRight" class="padBtn" aria-label="Destra">→</button>
+    `;
+
+    const right = document.createElement('div');
+    right.className = 'padRight';
+    right.innerHTML = `
+      <button id="padA" class="padBtn small" aria-label="Lift">A</button><span class="padLabel">LIFT</span>
+      <button id="padB" class="padBtn small" aria-label="Turbo">B</button><span class="padLabel">TURBO</span>
+    `;
+
+    bar.appendChild(left);
+    bar.appendChild(right);
+
+    // inserisci tra canvas e HUD
+    const hud = document.getElementById('hud');
+    wrap.insertBefore(bar, hud);
+
+    // wiring eventi (pointer, anche iPhone)
+    const btnUp    = bar.querySelector('#padUp');
+    const btnDown  = bar.querySelector('#padDown');
+    const btnLeft  = bar.querySelector('#padLeft');
+    const btnRight = bar.querySelector('#padRight');
+    const btnA     = bar.querySelector('#padA');
+    const btnB     = bar.querySelector('#padB');
+
+    const down = (e)=>{ e.preventDefault(); ensureAudio(); actx&&actx.resume&&actx.resume(); if(!running) startGame(); };
+    // tap ↑/↓
+    btnUp.addEventListener('pointerdown', e=>{ down(e); laneUp(); blip(760,0.05,0.06); });
+    btnDown.addEventListener('pointerdown', e=>{ down(e); laneDown(); blip(540,0.05,0.06); });
+
+    // hold ←/→
+    btnLeft.addEventListener('pointerdown', e=>{ down(e); holdLeft=true; });
+    btnRight.addEventListener('pointerdown',e=>{ down(e); holdRight=true; });
+    ['pointerup','pointercancel','pointerleave'].forEach(t=>{
+      btnLeft.addEventListener(t, ()=>{ holdLeft=false; }, {passive:true});
+      btnRight.addEventListener(t,()=>{ holdRight=false;}, {passive:true});
+    });
+
+    // A = Lift (tap/hold non serve)
+    btnA.addEventListener('pointerdown', e=>{ down(e); manualLift(); });
+
+    // B = Turbo (hold)
+    btnB.addEventListener('pointerdown', e=>{ down(e); holdTurbo=true; blip(460,0.04,0.06,'triangle'); });
+    ['pointerup','pointercancel','pointerleave'].forEach(t=>{
+      btnB.addEventListener(t, ()=>{ if (holdTurbo){ holdTurbo=false; blip(260,0.05,0.05,'triangle'); }}, {passive:true});
+    });
+  }
 
   // ===== Start / Pause =====
   function startGame(){
@@ -190,19 +248,19 @@
     player.lifting=true;
     const delta=(levelY.low - levelY.high)*(L.dir==='up'?1:-1);
     liftAnim={ t:0, fromY:player.y, toY:player.y - delta };
-    L.active=false; sweep(L.dir==='up'?420:520, L.dir==='up'?980:360, 0.22, 0.07);
+    L.active=false; sweep(L.dir==='up'?420:520, L.dir==='up'?980:360, 0.22, 0.08);
     score += 50; if(scoreEl) scoreEl.textContent = score;
   }
 
   // ===== Update =====
   function update(dt){
     const keyboardTurbo = !!keys['Space'];
-    const turbo = player.turboOn || keyboardTurbo;
+    const turbo = player.turboOn || keyboardTurbo || holdTurbo;
     const targetSpeed = turbo ? player.turbo : player.speed;
 
-    // X (tasti o dpad hold)
-    const right = keys['ArrowRight']||keys['KeyD']||PAD.right.hold;
-    const left  = keys['ArrowLeft'] ||keys['KeyA']||PAD.left.hold;
+    // X (tasti o dpad esterno)
+    const right = keys['ArrowRight']||keys['KeyD']||holdRight;
+    const left  = keys['ArrowLeft'] ||keys['KeyA']||holdLeft;
     player.vx = right ? 1 : left ? -1 : 0;
     player.x += player.vx * 180 * dt;
     player.x = Math.max(40, Math.min(W*0.62, player.x));
@@ -254,13 +312,11 @@
       if(overlapRelaxed(player,o,-3)){ player.alive=false; running=false; crash(); break; }
     }
 
-    // Score & time
+    // Score & time + Best
     elapsed += dt;
-    score += Math.floor(1 * dt); // +1/s
+    score += Math.floor(1 * dt);
     if(timeEl)  timeEl.textContent  = elapsed.toFixed(1);
     if(scoreEl) scoreEl.textContent = score;
-
-    // Best
     if(score > best){ best = score; localStorage.setItem('liftRunnerBest', String(best)); }
   }
 
@@ -284,15 +340,21 @@
     for(const o of obstacles) drawObstacle(o);
     drawCar(player);
 
+    // HUD in-canvas (tempo/score/best) sempre visibile
+    ctx.save();
+    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,170,46);
+    ctx.fillStyle='#ecf2ff'; ctx.font='bold 14px system-ui,Segoe UI,Arial';
+    ctx.fillText(`⏱ ${elapsed.toFixed(1)}s`, 16, 28);
+    ctx.fillText(`🏁 ${score}`, 16, 44);
+    ctx.textAlign='right'; ctx.fillText(`Best: ${best}`, 176, 28);
+    ctx.restore();
+
     // Hint READY
     const el = eligibleLift();
     if(el && player.alive && !player.lifting){
       ctx.save(); ctx.font='bold 16px system-ui,Segoe UI,Arial'; ctx.fillStyle='#eaffef'; ctx.textAlign='center';
       ctx.fillText('LIFT READY', player.x + player.w/2, player.y - 14); ctx.restore();
     }
-
-    // GamePad
-    drawPad();
 
     // Overlays
     if(!running || paused || !player.alive){
@@ -341,37 +403,6 @@
     ctx.fillStyle='#ffe066'; ctx.fillRect(p.x+p.w-6,p.y+6,4,6);
   }
 
-  function drawPad(){
-    const now=performance.now();
-    drawBtn(PAD.left,  PAD.left.hold,  '←', 22);
-    drawBtn(PAD.right, PAD.right.hold, '→', 22);
-    drawBtn(PAD.up,    now < PAD.up.flash,   '↑', 22);
-    drawBtn(PAD.down,  now < PAD.down.flash, '↓', 22);
-    drawBtn(PAD.A,     PAD.A.hold, 'A\nLIFT', 14);
-    drawBtn(PAD.B,     PAD.B.hold, 'B\nTURBO', 14);
-  }
-  function drawBtn(b, pressed, label, fs){
-    const r=12;
-    ctx.fillStyle='rgba(0,0,0,0.35)'; roundRect(b.x+2,b.y+4,b.w,b.h,r); ctx.fill();
-    ctx.fillStyle = pressed ? '#1c8c7a' : '#1a2755';
-    ctx.strokeStyle = pressed ? '#54e0c2' : '#2dd4bf'; ctx.lineWidth=2;
-    roundRect(b.x,b.y,b.w,b.h,r); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#e6f7ff'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    if(label.includes('\n')){
-      const [l1,l2]=label.split('\n');
-      ctx.font=`bold ${fs}px system-ui,Segoe UI,Arial`; ctx.fillText(l1, b.x+b.w/2, b.y+b.h/2-8);
-      ctx.font=`bold ${fs-1}px system-ui,Segoe UI,Arial`; ctx.fillText(l2, b.x+b.w/2, b.y+b.h/2+10);
-    } else {
-      ctx.font=`bold ${fs}px system-ui,Segoe UI,Arial`; ctx.fillText(label, b.x+b.w/2, b.y+b.h/2);
-    }
-  }
-  function roundRect(x,y,w,h,r){
-    ctx.beginPath();
-    ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-    ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-    ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-    ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
-  }
   function drawStars(){
     ctx.fillStyle='#1d2a55';
     for(let i=0;i<60;i++){
@@ -384,6 +415,9 @@
     const dt=Math.min(0.033,(now-last)/1000); last=now;
     if(running && !paused && player.alive) update(dt);
     draw();
+    // HUD DOM sempre aggiornato
+    if (timeEl)  timeEl.textContent  = elapsed.toFixed(1);
+    if (scoreEl) scoreEl.textContent = String(score);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(ts=>{ last=ts; draw(); requestAnimationFrame(loop); });
