@@ -1,22 +1,38 @@
 {
-  "name": "Lift Runner — Sollevatori & Livelli (PWA)",
+  "name": "Lift Runner — PWA Prototype",
   "short_name": "LiftRunner",
-  "start_url": "./?src=pwa",
+  "description": "Gioco arcade in stile mercato: evita gli ostacoli, usa i sollevatori e raggiungi il piano superiore. Compatibile con iPhone e offline-ready.",
+  "start_url": "./?source=pwa",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0b1022",
+  "orientation": "landscape",
   "theme_color": "#0f172a",
+  "background_color": "#0a0f25",
+  "lang": "it",
   "icons": [
     {
-      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAQAAADr6o0LAAAAAElFTkSuQmCC",
+      "src": "./icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAQAAABq3X9WAAAAAElFTkSuQmCC",
+      "src": "./icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
