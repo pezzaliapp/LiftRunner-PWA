@@ -4,8 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <title>Lift Runner — PWA Prototype</title>
+
+  <!-- Tema & PWA -->
   <meta name="theme-color" content="#0f172a">
   <link rel="manifest" href="./manifest.webmanifest">
+
+  <!-- iOS: installabile a schermo intero + icona -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lift Runner">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+
+  <!-- Favicon desktop (opzionale ma utile) -->
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./icons/icon-192.png">
+
   <style>
     :root{
       --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9; --acc:#22c55e; --danger:#ef4444;
@@ -52,26 +65,25 @@
 
   <footer>PWA: offline-ready. Installa dalla barra del browser (Aggiungi alla Home).</footer>
 
+  <!-- PWA SW registration & auto-update -->
   <script>
-    // --- PWA SW registration & auto-update
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').then(reg => {
-          // Se è disponibile una nuova versione, aggiornala subito
+          // nuova versione? applica subito
           if (reg.waiting) {
             reg.waiting.postMessage({ type: 'SKIP_WAITING' });
             window.location.reload();
           }
           reg.addEventListener('updatefound', () => {
-            const newSW = reg.installing;
-            if (newSW) {
-              newSW.addEventListener('statechange', () => {
-                if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
-                  newSW.postMessage({ type: 'SKIP_WAITING' });
-                  window.location.reload();
-                }
-              });
-            }
+            const nw = reg.installing;
+            if (!nw) return;
+            nw.addEventListener('statechange', () => {
+              if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                nw.postMessage({ type: 'SKIP_WAITING' });
+                window.location.reload();
+              }
+            });
           });
         }).catch(err => console.warn('SW registration failed:', err));
       });
