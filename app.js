@@ -1,9 +1,8 @@
-/* Lift Runner — v2.6 (D-pad DOM fuori dal gioco)
- * - D-pad DOM inserito via JS tra canvas e HUD: ← → hold, ↑/↓ tap, A=LIFT, B=TURBO (hold)
- * - Start overlay, Pausa, iPhone-friendly (pointer + touchAction:none)
- * - Lift UP/DOWN + auto-lift (150ms)
- * - Suoni WebAudio (sbloccati al primo input)
- * - Punteggio: tempo + sorpassi + lift; Best score su localStorage
+/* Lift Runner — v2.6.1 (desktop+mobile adaptive)
+ * - D-pad DOM SOLO su smartphone/tablet (iPhone/Android). Su desktop si usa la tastiera.
+ * - Start/Pausa, Lift up/down + auto-lift, Turbo, Suoni WebAudio.
+ * - Punteggio: tempo + sorpassi + lift. Best score su localStorage.
+ * - HUD DOM (time/score) sempre aggiornato.
  */
 
 (() => {
@@ -18,7 +17,10 @@
   const pauseBtn= document.getElementById('pauseBtn');
   const wrap    = document.getElementById('gamewrap');
 
-  // iPhone: blocca gesture/zoom
+  // --- Mobile detection (abbastanza per il nostro caso) ---
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  // iPhone: evita gesture/zoom sul canvas
   canvas.style.touchAction = 'none';
 
   // Focus tastiera su desktop
@@ -31,20 +33,20 @@
   const LANES = 3;
   const laneGap = 32;
   const levelY = { low: H - 120, high: H - 320 };
-  const roadH = 12;
+  const roadH  = 12;
   const BASE_SCROLL = 3.0;
 
   const player = {
     x: 120, y: levelY.low - 2*laneGap,
-    w: 50, h: 24,
-    vx: 0,
+    w: 50, h: 24, vx: 0,
     speed: 3.6, turbo: 6.4,
     level: 'low', lane: 1,
     alive: true, lifting: false,
-    turboOn: false
+    turboOn: false,
+    padState: { left:false, right:false } // usato solo su mobile
   };
 
-  const obstacles = [];   // {x,y,w,h,level,lane,speed,scored?}
+  const obstacles = [];   // {x,y,w,h,level,lane,speed,scored}
   const lifts = [];       // {x,y,w,h,dir:'up'|'down',active,alignedLane}
 
   // ===== Audio (WebAudio) =====
@@ -60,26 +62,28 @@
   const sweep=(f0=420,f1=920,d=0.22,g=0.08)=>{
     if(muted || !actx) return; const t=actx.currentTime;
     const o=actx.createOscillator(), v=actx.createGain();
-    o.type='sawtooth'; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+d);
+    o.type='sawtooth'; o.frequency.setValueAtTime(f0,t);
+    o.frequency.exponentialRampToValueAtTime(f1,t+d);
     v.gain.value=g; v.gain.exponentialRampToValueAtTime(0.0001,t+d);
     o.connect(v).connect(actx.destination); o.start(t); o.stop(t+d);
   };
   const crash=()=>{
     if(muted || !actx) return; const t=actx.currentTime;
     const b=actx.createBuffer(1, actx.sampleRate*0.25, actx.sampleRate);
-    const data=b.getChannelData(0); for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,2);
-    const s=actx.createBufferSource(); const v=actx.createGain();
+    const d=b.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2);
+    const s=actx.createBufferSource(), v=actx.createGain();
     v.gain.value=0.20; v.gain.exponentialRampToValueAtTime(0.0001,t+0.25);
     s.buffer=b; s.connect(v).connect(actx.destination); s.start(t);
   };
   ['pointerdown','keydown','touchstart','click'].forEach(t=>{
-    window.addEventListener(t, ()=>{ ensureAudio(); actx && actx.resume && actx.resume();},{once:true,passive:true});
+    window.addEventListener(t, ()=>{ ensureAudio(); actx && actx.resume && actx.resume(); }, {once:true, passive:true});
   });
 
   // ===== Spawn =====
-  function spawnObstacle() {
+  function spawnObstacle(){
     const level = Math.random()<0.5 ? 'low' : 'high';
-    const lane = Math.floor(Math.random()*LANES);
+    const lane  = Math.floor(Math.random()*LANES);
     const lastX = obstacles.length ? obstacles[obstacles.length-1].x : W;
     const minGapX = 140 + Math.random()*90;
     obstacles.push({
@@ -87,23 +91,23 @@
       y: (level==='low'? levelY.low : levelY.high) - lane*laneGap - 6,
       w: 40, h: 20, level, lane,
       speed: BASE_SCROLL + Math.random()*1.2,
-      scored:false
+      scored: false
     });
   }
-  function spawnLift(dir = (Math.random()<0.6 ? 'up' : 'down')) {
-    const lane = 1, yBase = (dir==='up' ? levelY.low : levelY.high);
+  function spawnLift(dir=(Math.random()<0.6?'up':'down')){
+    const lane=1, yBase=(dir==='up'? levelY.low : levelY.high);
     const lastX = lifts.length ? lifts[lifts.length-1].x : W;
     const gap = 260 + Math.random()*160;
     lifts.push({
       x: Math.max(W+160, lastX+gap),
       y: yBase - lane*laneGap - 6,
-      w: 140, h: 16, dir, active:true, alignedLane: lane
+      w: 140, h: 16, dir, active: true, alignedLane: lane
     });
   }
   for(let i=0;i<3;i++) spawnObstacle();
   spawnLift('up'); spawnLift('down');
 
-  // ===== State =====
+  // ===== Stato =====
   let running=false, paused=false;
   let last=performance.now(), elapsed=0, score=0;
   let best = +localStorage.getItem('liftRunnerBest') || 0;
@@ -130,14 +134,14 @@
   if(liftBtn)  liftBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); manualLift(); if(!running) startGame(); });
   if(pauseBtn) pauseBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); togglePause(); });
 
-  // ===== D-pad DOM (fuori dal canvas) =====
-  let holdLeft=false, holdRight=false, holdTurbo=false;  // stati hold dei bottoni
-  createPadDOM();
+  // ===== D-pad DOM: SOLO MOBILE =====
+  let holdLeft=false, holdRight=false, holdTurbo=false;
+  if (isMobile) createPadDOM();
 
   function createPadDOM(){
     if (!wrap) return;
 
-    // stile via <style> iniettato
+    // stile iniettato
     const css = document.createElement('style');
     css.textContent = `
       #padBar{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;background:#0d1330;border-top:1px solid #1d2a55}
@@ -154,7 +158,6 @@
     `;
     document.head.appendChild(css);
 
-    // struttura DOM
     const bar = document.createElement('div');
     bar.id = 'padBar';
 
@@ -183,7 +186,7 @@
     const hud = document.getElementById('hud');
     wrap.insertBefore(bar, hud);
 
-    // wiring eventi (pointer, anche iPhone)
+    // wiring
     const btnUp    = bar.querySelector('#padUp');
     const btnDown  = bar.querySelector('#padDown');
     const btnLeft  = bar.querySelector('#padLeft');
@@ -192,8 +195,9 @@
     const btnB     = bar.querySelector('#padB');
 
     const down = (e)=>{ e.preventDefault(); ensureAudio(); actx&&actx.resume&&actx.resume(); if(!running) startGame(); };
+
     // tap ↑/↓
-    btnUp.addEventListener('pointerdown', e=>{ down(e); laneUp(); blip(760,0.05,0.06); });
+    btnUp.addEventListener('pointerdown',   e=>{ down(e); laneUp(); blip(760,0.05,0.06); });
     btnDown.addEventListener('pointerdown', e=>{ down(e); laneDown(); blip(540,0.05,0.06); });
 
     // hold ←/→
@@ -204,7 +208,7 @@
       btnRight.addEventListener(t,()=>{ holdRight=false;}, {passive:true});
     });
 
-    // A = Lift (tap/hold non serve)
+    // A = Lift
     btnA.addEventListener('pointerdown', e=>{ down(e); manualLift(); });
 
     // B = Turbo (hold)
@@ -227,9 +231,9 @@
   function togglePause(){ if(!running) return; paused=!paused; if(!paused) last=performance.now(); if(pauseBtn) pauseBtn.textContent=paused?'Resume':'Pausa'; }
 
   // ===== Lift =====
-  let liftAnim=null;               // {t,fromY,toY}
-  let eligibleSince=0;             // ms
-  const AUTO_LIFT_DELAY=150;       // ms
+  let liftAnim=null;
+  let eligibleSince=0;
+  const AUTO_LIFT_DELAY=150;
   const LIFT_TOL=18;
 
   function eligibleLift(){
@@ -252,24 +256,34 @@
     score += 50; if(scoreEl) scoreEl.textContent = score;
   }
 
+  // ===== Helpers =====
+  function laneUp(){ if(!player.lifting && player.lane<LANES-1) player.lane++; }
+  function laneDown(){ if(!player.lifting && player.lane>0)     player.lane--; }
+  function overlapRelaxed(a,b,p){
+    return a.x - p < b.x + b.w + p &&
+           a.x + a.w + p > b.x - p &&
+           a.y - p < b.y + b.h + p &&
+           a.y + a.h + p > b.y - p;
+  }
+
   // ===== Update =====
   function update(dt){
     const keyboardTurbo = !!keys['Space'];
     const turbo = player.turboOn || keyboardTurbo || holdTurbo;
     const targetSpeed = turbo ? player.turbo : player.speed;
 
-    // X (tasti o dpad esterno)
+    // X (tastiera o D-pad mobile)
     const right = keys['ArrowRight']||keys['KeyD']||holdRight;
     const left  = keys['ArrowLeft'] ||keys['KeyA']||holdLeft;
     player.vx = right ? 1 : left ? -1 : 0;
     player.x += player.vx * 180 * dt;
     player.x = Math.max(40, Math.min(W*0.62, player.x));
 
-    // Cambio corsia tastiera (edge)
+    // Cambio corsia da tastiera (edge)
     if((keys['ArrowUp']||keys['KeyW']) && !player.lifting){ laneUp(); keys['ArrowUp']=keys['KeyW']=false; blip(760,0.05,0.06); }
     if((keys['ArrowDown']||keys['KeyS']) && !player.lifting){ laneDown(); keys['ArrowDown']=keys['KeyS']=false; blip(540,0.05,0.06); }
 
-    // Y / anim lift
+    // Y / animazione lift
     if(!player.lifting){
       const base=(player.level==='low')?levelY.low:levelY.high;
       const targetY= base - player.lane*laneGap - (player.h/2);
@@ -294,11 +308,9 @@
       // Sorpasso
       if(!o.scored && o.x + o.w < player.x){ o.scored=true; score+=5; blip(900,0.05,0.05,'triangle'); }
     }
-    for(const L2 of lifts){
-      L2.x -= (BASE_SCROLL + 1.1 + (turbo?0.4:0)) * dt * 60;
-    }
+    for(const L2 of lifts){ L2.x -= (BASE_SCROLL + 1.1 + (turbo?0.4:0)) * dt * 60; }
 
-    // Cleanup & respawn
+    // Cleanup / respawn
     for(let i=obstacles.length-1;i>=0;i--) if(obstacles[i].x + obstacles[i].w < -60) obstacles.splice(i,1);
     for(let i=lifts.length-1;i>=0;i--)     if(lifts[i].x + lifts[i].w < -70)       lifts.splice(i,1);
     if(obstacles.length < 5 && Math.random()<0.06) spawnObstacle();
@@ -306,7 +318,7 @@
     if(upC<2 && Math.random()<0.10) spawnLift('up');
     if(dnC<2 && Math.random()<0.08) spawnLift('down');
 
-    // Collisioni (tolleranti)
+    // Collisioni
     for(const o of obstacles){
       if(o.level!==player.level) continue;
       if(overlapRelaxed(player,o,-3)){ player.alive=false; running=false; crash(); break; }
@@ -314,20 +326,10 @@
 
     // Score & time + Best
     elapsed += dt;
-    score += Math.floor(1 * dt);
+    score += Math.floor(1 * dt); // +1/s
     if(timeEl)  timeEl.textContent  = elapsed.toFixed(1);
     if(scoreEl) scoreEl.textContent = score;
     if(score > best){ best = score; localStorage.setItem('liftRunnerBest', String(best)); }
-  }
-
-  function laneUp(){ if(!player.lifting && player.lane<LANES-1) player.lane++; }
-  function laneDown(){ if(!player.lifting && player.lane>0) player.lane--; }
-
-  function overlapRelaxed(a,b,pad){
-    return a.x - pad < b.x + b.w + pad &&
-           a.x + a.w + pad > b.x - pad &&
-           a.y - pad < b.y + b.h + pad &&
-           a.y + a.h + pad > b.y - pad;
   }
 
   // ===== Draw =====
@@ -340,7 +342,7 @@
     for(const o of obstacles) drawObstacle(o);
     drawCar(player);
 
-    // HUD in-canvas (tempo/score/best) sempre visibile
+    // HUD in-canvas (tempo/score/best)
     ctx.save();
     ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,170,46);
     ctx.fillStyle='#ecf2ff'; ctx.font='bold 14px system-ui,Segoe UI,Arial';
@@ -349,26 +351,30 @@
     ctx.textAlign='right'; ctx.fillText(`Best: ${best}`, 176, 28);
     ctx.restore();
 
-    // Hint READY
+    // Hint LIFT READY
     const el = eligibleLift();
     if(el && player.alive && !player.lifting){
       ctx.save(); ctx.font='bold 16px system-ui,Segoe UI,Arial'; ctx.fillStyle='#eaffef'; ctx.textAlign='center';
       ctx.fillText('LIFT READY', player.x + player.w/2, player.y - 14); ctx.restore();
     }
 
-    // Overlays
+    // Overlays (testo diverso mobile/desktop)
     if(!running || paused || !player.alive){
+      const tip = isMobile
+        ? 'D-pad sotto • A=LIFT • B=TURBO • Lift automatico quando pronto'
+        : 'Tastiera: ← → sposta • ↑/↓ corsia • L = LIFT • Spazio = TURBO';
+
       ctx.fillStyle='rgba(8,12,28,0.72)'; ctx.fillRect(0,0,W,H);
       ctx.fillStyle='#ecf2ff'; ctx.textAlign='center';
       if(!running){
         ctx.font='bold 34px system-ui,Segoe UI,Arial'; ctx.fillText('TAP ANYWHERE TO START', W/2, H/2);
-        ctx.font='15px system-ui,Segoe UI,Arial'; ctx.fillText('D-pad sotto • A=LIFT • B=TURBO • Lift automatico quando pronto', W/2, H/2+28);
+        ctx.font='15px system-ui,Segoe UI,Arial'; ctx.fillText(tip, W/2, H/2+28);
         ctx.fillText(`Best: ${best}`, W/2, H/2+48);
       } else if(paused){
         ctx.font='bold 34px system-ui,Segoe UI,Arial'; ctx.fillText('PAUSA', W/2, H/2);
       } else if(!player.alive){
         ctx.font='bold 34px system-ui,Segoe UI,Arial'; ctx.fillText('GAME OVER', W/2, H/2);
-        ctx.font='15px system-ui,Segoe UI,Arial'; ctx.fillText('Tocca per ripartire', W/2, H/2+28);
+        ctx.font='15px system-ui,Segoe UI,Arial'; ctx.fillText(isMobile ? 'Tocca per ripartire' : 'Premi R per ripartire', W/2, H/2+28);
         ctx.fillText(`Best: ${best}`, W/2, H/2+48);
       }
     }
@@ -384,10 +390,13 @@
   }
   function drawLift(L){
     ctx.fillStyle=L.active?'#2dd36f':'#2a7a54'; ctx.fillRect(L.x,L.y,L.w,L.h);
+    // piloni fino al piano basso
     ctx.fillStyle='#1b254d';
     ctx.fillRect(L.x+6, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
     ctx.fillRect(L.x+L.w-14, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
-    ctx.fillStyle='#eaffef'; const cx=L.x+L.w/2, cy=L.y+L.h/2;
+    // freccia dir
+    ctx.fillStyle='#eaffef';
+    const cx=L.x+L.w/2, cy=L.y+L.h/2;
     ctx.beginPath();
     if(L.dir==='up'){ ctx.moveTo(cx,cy-6); ctx.lineTo(cx-6,cy+4); ctx.lineTo(cx+6,cy+4); }
     else { ctx.moveTo(cx,cy+6); ctx.lineTo(cx-6,cy-4); ctx.lineTo(cx+6,cy-4); }
@@ -402,11 +411,11 @@
     ctx.fillStyle='#cfeee0'; ctx.fillRect(p.x+10,p.y+4,p.w-20,p.h-10);
     ctx.fillStyle='#ffe066'; ctx.fillRect(p.x+p.w-6,p.y+6,4,6);
   }
-
   function drawStars(){
     ctx.fillStyle='#1d2a55';
     for(let i=0;i<60;i++){
-      const x=(i*53 + (elapsed*40)%W)%W, y=(i*37)%H; ctx.fillRect(x,y,2,2);
+      const x=(i*53 + (elapsed*40)%W)%W, y=(i*37)%H;
+      ctx.fillRect(x,y,2,2);
     }
   }
 
@@ -420,5 +429,10 @@
     if (scoreEl) scoreEl.textContent = String(score);
     requestAnimationFrame(loop);
   }
+
+  // ===== Reset/Start helpers =====
+  function toStart(){ running=false; paused=false; }
+
+  // kick
   requestAnimationFrame(ts=>{ last=ts; draw(); requestAnimationFrame(loop); });
 })();
