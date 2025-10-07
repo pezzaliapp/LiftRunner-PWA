@@ -1,11 +1,9 @@
-/* Lift Runner — v2.3 (mobile arcade)
- * - D-pad stile GameBoy nel canvas: ← → ↑ ↓ + A(LIFT) + B(TURBO)
- * - Premi e tieni premuto sui pulsanti; niente swipe
- * - Start overlay; iPhone safe (touchAction:none, pointer events)
+/* Lift Runner — v2.4 (mobile arcade completo)
+ * - D-pad fisso nel canvas: ← → hold, ↑/↓ tap, A=LIFT, B=TURBO (hold)
+ * - Start overlay, Pausa (P/HUD), iPhone-friendly (pointer + touchAction:none)
  * - Lift UP/DOWN + auto-lift (150ms)
- * - Suoni: start, lift, lane, turbo on/off, score, crash
- * - Punteggio: tempo (+1/s) + sorpassi (+5) + lift (+50)
- * - Funziona con il tuo HTML (time/score/liftBtn/pauseBtn)
+ * - Suoni WebAudio (sbloccati al primo input)
+ * - Punteggio: tempo + sorpassi + lift; Best score su localStorage
  */
 
 (() => {
@@ -23,7 +21,8 @@
   canvas.style.touchAction = 'none';
 
   // Focus tastiera su desktop
-  canvas.tabIndex = 0; const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
+  canvas.tabIndex = 0; 
+  const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
   window.addEventListener('load', focusCanvas);
   canvas.addEventListener('pointerdown', focusCanvas);
 
@@ -48,24 +47,24 @@
   const lifts = [];       // {x,y,w,h,dir:'up'|'down',active,alignedLane}
 
   // ===== Audio (WebAudio) =====
-  let actx=null;
+  let actx=null, muted=false;
   const ensureAudio=()=>{ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch{} } };
   const blip=(f=660, d=0.07, g=0.08, type='square')=>{
-    if(!actx) return; const t=actx.currentTime;
+    if(muted || !actx) return; const t=actx.currentTime;
     const o=actx.createOscillator(), v=actx.createGain();
     o.type=type; o.frequency.setValueAtTime(f,t);
     v.gain.setValueAtTime(g,t); v.gain.linearRampToValueAtTime(0.0001,t+d);
     o.connect(v).connect(actx.destination); o.start(t); o.stop(t+d);
   };
   const sweep=(f0=420,f1=920,d=0.22,g=0.06)=>{
-    if(!actx) return; const t=actx.currentTime;
+    if(muted || !actx) return; const t=actx.currentTime;
     const o=actx.createOscillator(), v=actx.createGain();
     o.type='sawtooth'; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+d);
     v.gain.value=g; v.gain.exponentialRampToValueAtTime(0.0001,t+d);
     o.connect(v).connect(actx.destination); o.start(t); o.stop(t+d);
   };
   const crash=()=>{
-    if(!actx) return; const t=actx.currentTime;
+    if(muted || !actx) return; const t=actx.currentTime;
     const b=actx.createBuffer(1, actx.sampleRate*0.25, actx.sampleRate);
     const data=b.getChannelData(0); for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,2);
     const s=actx.createBufferSource(); const v=actx.createGain();
@@ -106,16 +105,18 @@
   // ===== State =====
   let running=false, paused=false;
   let last=performance.now(), elapsed=0, score=0;
+  let best = +localStorage.getItem('liftRunnerBest') || 0;
 
   // ===== Keyboard =====
   const keys=Object.create(null);
-  const handled=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Space','KeyL','KeyP','KeyR']);
+  const handled=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Space','KeyL','KeyP','KeyR','KeyM']);
   window.addEventListener('keydown',e=>{
     const c=e.code||e.key; keys[c]=true;
     if(handled.has(c)) e.preventDefault();
     if(!running) startGame();
     if(c==='KeyP') togglePause();
     if(c==='KeyL') manualLift();
+    if(c==='KeyM') muted=!muted;
     if(c==='Space') { player.turboOn=true; blip(460,0.04,0.06,'triangle'); }
     if(c==='KeyR' && !player.alive) toStart();
   },{passive:false});
@@ -125,14 +126,11 @@
     if(c==='Space') { player.turboOn=false; blip(260,0.05,0.05,'triangle'); }
   },{passive:false});
 
-  if(liftBtn) liftBtn.addEventListener('click', ()=>{ manualLift(); if(!running) startGame(); });
+  if(liftBtn)  liftBtn.addEventListener('click', ()=>{ manualLift(); if(!running) startGame(); });
   if(pauseBtn) pauseBtn.addEventListener('click', togglePause);
 
   // ===== GamePad (canvas) =====
-  // layout: D-pad a sinistra, A/B a destra
   const PAD = {
-    baseY: H - 88,                // bordo superiore dei comandi
-    dpad: { x: 24, y: H - 88, s: 56 },
     up:   { x: 24+56,    y: H-88-56, w:56, h:56, flash:0 },
     down: { x: 24+56,    y: H-88+56, w:56, h:56, flash:0 },
     left: { x: 24,       y: H-88,    w:56, h:56, hold:false },
@@ -181,7 +179,7 @@
     const need = (player.level==='low') ? 'up' : 'down';
     for(const L of lifts){
       if(!L.active || L.dir!==need) continue;
-      if (player.lane !== L.alignedLane) continue; // richiede corsia centrale
+      if (player.lane !== L.alignedLane) continue; // corsia centrale
       if (player.x + player.w > L.x - LIFT_TOL && player.x < L.x + L.w + LIFT_TOL &&
           player.y + player.h > L.y && player.y < L.y + L.h) return L;
     }
@@ -193,8 +191,7 @@
     const delta=(levelY.low - levelY.high)*(L.dir==='up'?1:-1);
     liftAnim={ t:0, fromY:player.y, toY:player.y - delta };
     L.active=false; sweep(L.dir==='up'?420:520, L.dir==='up'?980:360, 0.22, 0.07);
-    score += 50; // bonus lift
-    if(scoreEl) scoreEl.textContent = score;
+    score += 50; if(scoreEl) scoreEl.textContent = score;
   }
 
   // ===== Update =====
@@ -221,7 +218,8 @@
       player.y += (targetY - player.y) * Math.min(1, dt*10);
     } else {
       const dur=0.85; liftAnim.t += dt/dur;
-      const k = (liftAnim.t<1) ? (liftAnim.t<0.5 ? 4*liftAnim.t**3 : 1 - Math.pow(-2*liftAnim.t+2,3)/2) : 1;
+      const t= Math.min(1, liftAnim.t);
+      const k = t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
       player.y = liftAnim.fromY + (liftAnim.toY - liftAnim.fromY)*k;
       if(liftAnim.t>=1){ player.lifting=false; player.level=(player.level==='low')?'high':'low'; liftAnim=null; }
     }
@@ -235,7 +233,7 @@
     for(const o of obstacles){
       const boost = (player.level===o.level ? targetSpeed*0.45 : targetSpeed*0.25);
       o.x -= (o.speed + boost) * dt * 60;
-      // Sorpasso: quando la destra dell'ostacolo passa la x del player
+      // Sorpasso
       if(!o.scored && o.x + o.w < player.x){ o.scored=true; score+=5; blip(900,0.05,0.05,'triangle'); }
     }
     for(const L2 of lifts){
@@ -261,6 +259,9 @@
     score += Math.floor(1 * dt); // +1/s
     if(timeEl)  timeEl.textContent  = elapsed.toFixed(1);
     if(scoreEl) scoreEl.textContent = score;
+
+    // Best
+    if(score > best){ best = score; localStorage.setItem('liftRunnerBest', String(best)); }
   }
 
   function laneUp(){ if(!player.lifting && player.lane<LANES-1) player.lane++; }
@@ -300,11 +301,13 @@
       if(!running){
         ctx.font='bold 34px system-ui,Segoe UI,Arial'; ctx.fillText('TAP ANYWHERE TO START', W/2, H/2);
         ctx.font='15px system-ui,Segoe UI,Arial'; ctx.fillText('D-pad sotto • A=LIFT • B=TURBO • Lift automatico quando pronto', W/2, H/2+28);
+        ctx.fillText(`Best: ${best}`, W/2, H/2+48);
       } else if(paused){
         ctx.font='bold 34px system-ui,Segoe UI,Arial'; ctx.fillText('PAUSA', W/2, H/2);
       } else if(!player.alive){
         ctx.font='bold 34px system-ui,Segoe UI,Arial'; ctx.fillText('GAME OVER', W/2, H/2);
         ctx.font='15px system-ui,Segoe UI,Arial'; ctx.fillText('Tocca per ripartire', W/2, H/2+28);
+        ctx.fillText(`Best: ${best}`, W/2, H/2+48);
       }
     }
   }
@@ -340,31 +343,26 @@
 
   function drawPad(){
     const now=performance.now();
-    // D-pad arrows
-    drawBtn(PAD.left,  PAD.left.hold,  '←');
-    drawBtn(PAD.right, PAD.right.hold, '→');
-    drawBtn(PAD.up,    now < PAD.up.flash,   '↑');
-    drawBtn(PAD.down,  now < PAD.down.flash, '↓');
-    // A/B
-    drawBtn(PAD.A, PAD.A.hold, 'A\nLIFT');
-    drawBtn(PAD.B, PAD.B.hold, 'B\nTURBO');
+    drawBtn(PAD.left,  PAD.left.hold,  '←', 22);
+    drawBtn(PAD.right, PAD.right.hold, '→', 22);
+    drawBtn(PAD.up,    now < PAD.up.flash,   '↑', 22);
+    drawBtn(PAD.down,  now < PAD.down.flash, '↓', 22);
+    drawBtn(PAD.A,     PAD.A.hold, 'A\nLIFT', 14);
+    drawBtn(PAD.B,     PAD.B.hold, 'B\nTURBO', 14);
   }
-  function drawBtn(b, pressed, label){
+  function drawBtn(b, pressed, label, fs){
     const r=12;
-    // shadow
-    ctx.fillStyle='rgba(0,0,0,0.35)';
-    roundRect(b.x+2,b.y+4,b.w,b.h,r); ctx.fill();
-    // body
+    ctx.fillStyle='rgba(0,0,0,0.35)'; roundRect(b.x+2,b.y+4,b.w,b.h,r); ctx.fill();
     ctx.fillStyle = pressed ? '#1c8c7a' : '#1a2755';
     ctx.strokeStyle = pressed ? '#54e0c2' : '#2dd4bf'; ctx.lineWidth=2;
     roundRect(b.x,b.y,b.w,b.h,r); ctx.fill(); ctx.stroke();
-    // label
     ctx.fillStyle='#e6f7ff'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font = (label.includes('\n')?'bold 13px':'bold 20px')+' system-ui,Segoe UI,Arial';
     if(label.includes('\n')){
-      const [l1,l2]=label.split('\n'); ctx.fillText(l1, b.x+b.w/2, b.y+b.h/2-8); ctx.fillText(l2, b.x+b.w/2, b.y+b.h/2+10);
+      const [l1,l2]=label.split('\n');
+      ctx.font=`bold ${fs}px system-ui,Segoe UI,Arial`; ctx.fillText(l1, b.x+b.w/2, b.y+b.h/2-8);
+      ctx.font=`bold ${fs-1}px system-ui,Segoe UI,Arial`; ctx.fillText(l2, b.x+b.w/2, b.y+b.h/2+10);
     } else {
-      ctx.fillText(label, b.x+b.w/2, b.y+b.h/2);
+      ctx.font=`bold ${fs}px system-ui,Segoe UI,Arial`; ctx.fillText(label, b.x+b.w/2, b.y+b.h/2);
     }
   }
   function roundRect(x,y,w,h,r){
