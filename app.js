@@ -1,11 +1,10 @@
-/* Lift Runner — canvas prototype (v1.6 — iPhone ready)
- * - Controlli touch nel canvas: ← → (hold), ↑/↓ (tap), LIFT (tap)
- * - Nessuna modifica all’HTML: i bottoni sono disegnati e gestiti via JS
- * - Disabilita scroll/zoom su canvas (touchAction:none, preventDefault su touch/pointer)
- * - Lifts bidirezionali con stesso tasto L / bottone LIFT
- * - Input tastiera ancora attivo per desktop (e.code + preventDefault)
- * - Turbo (Space), movimento dt-scaled, hint “PRESS L”
- * - WebAudio sbloccato al primo tap
+/* Lift Runner — canvas prototype (v1.7 — iPhone ready + LIFT tollerante)
+ * - iPhone: controlli touch nel canvas (← → hold, ↑/↓ tap, LIFT tap), touchAction:none
+ * - Tastiera desktop (e.code + preventDefault), turbo Space
+ * - LIFT ora SENZA vincolo corsia: basta essere sopra la piattaforma della direzione corretta
+ * - Hitbox più ampia (TOL=22) + evidenziazione piattaforma quando attivabile
+ * - Hint "PRESS L / LIFT" sopra l’auto quando sei in presa
+ * - Nessun asset esterno
  */
 
 (() => {
@@ -19,7 +18,7 @@
   document.addEventListener('gesturechange', e => e.preventDefault(), {passive:false});
   document.addEventListener('gestureend', e => e.preventDefault(), {passive:false});
 
-  // Focus tastiera (per desktop)
+  // Focus (per tastiera su desktop)
   canvas.tabIndex = 0;
   const giveFocus = () => { try{ canvas.focus(); }catch{} };
   window.addEventListener('load', giveFocus);
@@ -37,6 +36,7 @@
   const laneGap = 28;
   const roadHeight = 12;
   const scrollSpeedBase = 3.2;
+  const LIFT_TOL = 22; // tolleranza laterale generosa
 
   const player = {
     x: 120,
@@ -65,12 +65,12 @@
     });
   }
   function spawnLift(type = (Math.random() < 0.6 ? 'up' : 'down')) {
-    const lane = 1; // centrale
+    const lane = 1; // estetica allineata al centro, ma NON più vincolante per il trigger
     const x0 = W + 200 + Math.random()*380;
     const yBase = (type === 'up' ? levelY.low : levelY.high);
     lifts.push({
       x: x0, y: yBase - lane*laneGap - 6,
-      w: 120, h: 16,          // un po' più lungo per facilità
+      w: 120, h: 16,
       alignedLane: lane,
       active: true,
       dir: type
@@ -102,7 +102,7 @@
   window.addEventListener('keydown', onKeyDown, {passive:false});
   window.addEventListener('keyup',   onKeyUp,   {passive:false});
 
-  // ===== Touch/Pointer per movimento orizzontale (swipe dolce) =====
+  // ===== Swipe dolce orizzontale =====
   let swipeStart = null;
   canvas.addEventListener('touchstart', e => { swipeStart = e.touches[0]; }, {passive:true});
   canvas.addEventListener('touchmove', e => {
@@ -113,7 +113,6 @@
   canvas.addEventListener('touchend', () => { player.vx = 0; swipeStart = null; });
 
   // ===== Bottoni touch disegnati nel canvas =====
-  // Layout: sinistra ← → ; destra ↑ ↓ ; centro-basso LIFT
   const BTN = {
     left:  { x: 16,       y: H - 84, w: 56, h: 56, hold:false },
     right: { x: 16 + 64,  y: H - 84, w: 56, h: 56, hold:false },
@@ -121,13 +120,6 @@
     down:  { x: W - 64,   y: H - 100,w: 48, h: 48, flash:0 },
     lift:  { x: (W/2)-48, y: H - 84, w: 96, h: 56, flash:0 }
   };
-  function setBtnGeometry(){ // ricomputa se cambi dimensioni canvas (non previsto qui)
-    BTN.left.y = BTN.right.y = BTN.lift.y = H - 84;
-    BTN.up.y = H - 160; BTN.down.y = H - 100;
-    BTN.up.x = BTN.down.x = W - 64;
-    BTN.lift.x = (W/2)-48;
-  }
-
   function roundRect(x,y,w,h,r){
     ctx.beginPath();
     ctx.moveTo(x+r, y);
@@ -166,12 +158,10 @@
     return { x: (clientX - rect.left)*scaleX, y: (clientY - rect.top)*scaleY };
   }
   function hit(pt, b){ return pt.x>=b.x && pt.x<=b.x+b.w && pt.y>=b.y && pt.y<=b.y+b.h; }
-
   function laneUp(){ if (!player.lifting && player.lane < lanesPerLevel-1) player.lane++; }
   function laneDown(){ if (!player.lifting && player.lane > 0) player.lane--; }
   function flash(b){ b.flash = performance.now()+120; }
 
-  // Pointer handling (iPhone-friendly): preventDefault per evitare scroll
   canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
     const pt = pointFromEvent(e);
@@ -182,7 +172,7 @@
     if (hit(pt, BTN.lift))  { tryLift();  flash(BTN.lift); return; }
   }, {passive:false});
   const releaseHolds = () => { BTN.left.hold = BTN.right.hold = false; };
-  canvas.addEventListener('pointerup',   e => { e.preventDefault(); releaseHolds(); }, {passive:false});
+  canvas.addEventListener('pointerup',     e => { e.preventDefault(); releaseHolds(); }, {passive:false});
   canvas.addEventListener('pointercancel', e => { e.preventDefault(); releaseHolds(); }, {passive:false});
   canvas.addEventListener('pointerleave',  e => { e.preventDefault(); releaseHolds(); }, {passive:false});
 
@@ -199,22 +189,15 @@
 
   // ===== Audio (beep sintetico) =====
   let audioCtx = null;
-  function ensureAudio(){
-    if (!audioCtx) {
-      try { audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch {}
-    }
-  }
+  function ensureAudio(){ if (!audioCtx) { try { audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch {} } }
   function beep(freq=880, dur=0.06, gain=0.08){
     if (!audioCtx) return;
     const t0 = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const g = audioCtx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(freq, t0);
-    g.gain.value = gain;
-    osc.connect(g).connect(audioCtx.destination);
-    osc.start(t0);
-    osc.stop(t0 + dur);
+    osc.type = 'square'; osc.frequency.setValueAtTime(freq, t0);
+    g.gain.value = gain; osc.connect(g).connect(audioCtx.destination);
+    osc.start(t0); osc.stop(t0 + dur);
   }
   ['pointerdown','touchstart','keydown'].forEach(type=>{
     window.addEventListener(type, () => { ensureAudio(); audioCtx && audioCtx.resume && audioCtx.resume(); }, {once:true, passive:true});
@@ -228,20 +211,22 @@
            a.y < b.y + b.h + pad &&
            a.y + a.h > b.y - pad;
   }
+
+  // Ritorna il lift attivabile (stesso piano/direzione), SENZA vincolo corsia
   function eligibleLift(){
     if (!player.alive || player.lifting) return null;
-    const TOL = 12;
     const needDir = (player.level === 'low') ? 'up' : 'down';
+    // preferisci quello più vicino al centro del player
+    let best=null, bestDx=1e9;
     for (const L of lifts){
       if (!L.active || L.dir !== needDir) continue;
-      if (player.lane !== L.alignedLane) continue;
-      if (player.x + player.w > L.x - TOL && player.x < L.x + L.w + TOL &&
-          player.y + player.h > L.y && player.y < L.y + L.h) {
-        return L;
-      }
+      if (!rectOverlap(player, L, LIFT_TOL)) continue;
+      const dx = Math.abs((player.x + player.w/2) - (L.x + L.w/2));
+      if (dx < bestDx) { best=L; bestDx=dx; }
     }
-    return null;
+    return best;
   }
+
   function tryLift(){
     const L = eligibleLift();
     if (!L) return;
@@ -251,10 +236,13 @@
     L.active = false;
   }
 
-  // HUD (bottone DOM) e hint visivo
+  // HUD e hint
   let lastEligibleDir = null;
+  let hintPressL = false;
+  let eligibleCurrent = null; // per evidenziare il lift nel draw
   function updateHudEligible(){
     const L = eligibleLift();
+    eligibleCurrent = L;
     let label = 'LIFT';
     let dir = null;
     if (L) { dir = L.dir; label = (dir === 'up') ? 'LIFT ↑ ✓' : 'LIFT ↓ ✓'; }
@@ -263,10 +251,8 @@
       if (dir) beep(dir === 'up' ? 920 : 720, 0.045, 0.07);
       lastEligibleDir = dir;
     }
-    // Fumetto "PRESS L" sopra l'auto (utile anche su iPhone per mostrare il momento giusto)
     hintPressL = !!L;
   }
-  let hintPressL = false;
 
   // ===== Loop =====
   let last = performance.now();
@@ -277,7 +263,7 @@
     const turboOn = !!keys['Space'];
     const targetSpeed = turboOn ? player.turbo : player.speed;
 
-    // Movimento orizzontale: tastiera o touch-hold
+    // Orizzontale: tastiera o touch-hold
     const right = keys['ArrowRight'] || keys['KeyD'] || BTN.right.hold;
     const left  = keys['ArrowLeft']  || keys['KeyA'] || BTN.left.hold;
     player.vx = right ? 1 : left ? -1 : 0;
@@ -285,14 +271,10 @@
     player.x = Math.max(40, Math.min(W*0.6, player.x));
 
     // Cambio corsia tastiera
-    if ((keys['ArrowUp']||keys['KeyW']) && !player.lifting) {
-      laneUp(); keys['ArrowUp'] = keys['KeyW'] = false;
-    }
-    if ((keys['ArrowDown']||keys['KeyS']) && !player.lifting) {
-      laneDown(); keys['ArrowDown'] = keys['KeyS'] = false;
-    }
+    if ((keys['ArrowUp']||keys['KeyW']) && !player.lifting) { laneUp();   keys['ArrowUp']=keys['KeyW']=false; }
+    if ((keys['ArrowDown']||keys['KeyS']) && !player.lifting){ laneDown(); keys['ArrowDown']=keys['KeyS']=false; }
 
-    // Y / lift
+    // Y / lift anim
     if (!player.lifting){
       const base = player.level==='low' ? levelY.low : levelY.high;
       const targetY = base - player.lane*laneGap - (player.h/2);
@@ -319,7 +301,7 @@
       L.x -= (scrollSpeedBase + boost) * dt * 60;
     }
 
-    // Cleanup & respawn
+    // Cleanup & spawn
     for (let i=obstacles.length-1;i>=0;i--) if (obstacles[i].x + obstacles[i].w < -40) obstacles.splice(i,1);
     for (let i=lifts.length-1;i>=0;i--)     if (lifts[i].x + lifts[i].w < -40)   lifts.splice(i,1);
     if (obstacles.length < 6) spawnObstacle();
@@ -350,7 +332,7 @@
     drawRoad(levelY.low);
 
     // Lifts
-    for (const L of lifts) drawLift(L);
+    for (const L of lifts) drawLift(L, L===eligibleCurrent);
 
     // Ostacoli
     for (const o of obstacles){
@@ -378,96 +360,4 @@
     // Bottoni touch
     const now = performance.now();
     drawBtnRect(BTN.left,  BTN.left.hold,  '←');
-    drawBtnRect(BTN.right, BTN.right.hold, '→');
-    drawBtnRect(BTN.up,    now < BTN.up.flash,   '↑', 'bold 20px system-ui,Segoe UI,Arial');
-    drawBtnRect(BTN.down,  now < BTN.down.flash, '↓', 'bold 20px system-ui,Segoe UI,Arial');
-    // LIFT: mostra ✓ se agganciabile
-    const can = !!eligibleLift();
-    drawBtnRect(BTN.lift,  now < BTN.lift.flash, can ? 'LIFT ✓' : 'LIFT', 'bold 18px system-ui,Segoe UI,Arial');
-  }
-
-  function drawLift(L){
-    ctx.fillStyle = L.active ? '#2dd36f' : '#2a7a54';
-    ctx.fillRect(L.x, L.y, L.w, L.h);
-    ctx.fillStyle = '#1b254d';
-    ctx.fillRect(L.x+6, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
-    ctx.fillRect(L.x+L.w-14, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
-    ctx.fillStyle = '#eaffef';
-    const cx = L.x + L.w/2, cy = L.y + L.h/2;
-    ctx.beginPath();
-    if (L.dir === 'up'){ ctx.moveTo(cx, cy-6); ctx.lineTo(cx-6, cy+4); ctx.lineTo(cx+6, cy+4); }
-    else { ctx.moveTo(cx, cy+6); ctx.lineTo(cx-6, cy-4); ctx.lineTo(cx+6, cy-4); }
-    ctx.closePath(); ctx.fill();
-  }
-
-  function drawRoad(yBase){
-    ctx.fillStyle = '#0f1834';
-    ctx.fillRect(0, yBase, W, roadHeight);
-    ctx.strokeStyle = '#223069';
-    ctx.lineWidth = 2;
-    for (let i=0;i<lanesPerLevel;i++){
-      const y = yBase - i*laneGap - (laneGap/2);
-      ctx.setLineDash([12,10]);
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
-
-  function drawCar(p){
-    ctx.fillStyle = p.alive ? '#22c55e' : '#7a2b2b';
-    ctx.fillRect(p.x, p.y, p.w, p.h);
-    ctx.fillStyle = '#cfeee0';
-    ctx.fillRect(p.x+10, p.y+4, p.w-20, p.h-10);
-    ctx.fillStyle = '#ffe066';
-    ctx.fillRect(p.x+p.w-6, p.y+6, 4, 6);
-  }
-
-  function drawStars(){
-    ctx.fillStyle = '#0b1022';
-    ctx.fillRect(0,0,W,H);
-    ctx.fillStyle = '#1d2a55';
-    for (let i=0;i<60;i++){
-      const x = (i*53 + (elapsed*40)%W)%W;
-      const y = (i*37)%H;
-      ctx.fillRect(x, y, 2, 2);
-    }
-  }
-
-  function easeInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
-
-  function loop(now){
-    if (paused) return;
-    const dt = Math.min(0.033, (now - last)/1000);
-    last = now;
-    if (player.alive) update(dt);
-    draw();
-
-    if (!player.alive){
-      ctx.fillStyle = 'rgba(8,12,28,0.6)';
-      ctx.fillRect(0,0,W,H);
-      ctx.fillStyle = '#ecf2ff';
-      ctx.font = 'bold 32px system-ui,Segoe UI,Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('GAME OVER', W/2, H/2 - 10);
-      ctx.font = '16px system-ui,Segoe UI,Arial';
-      ctx.fillText('Tocca LIFT o premi R per ricominciare', W/2, H/2 + 22);
-      // restart con R (desktop) o tocco su LIFT
-      return;
-    }
-    requestAnimationFrame(loop);
-  }
-
-  function resetGame(){
-    obstacles.length = 0; lifts.length = 0;
-    for (let i=0;i<5;i++) spawnObstacle();
-    for (let i=0;i<2;i++) spawnLift('up');
-    spawnLift('down');
-    player.x = 120; player.level='low'; player.lane = 1;
-    player.alive = true; player.lifting = false;
-    elapsed = 0; score = 0; last = performance.now();
-    requestAnimationFrame(loop);
-  }
-
-  // Start
-  requestAnimationFrame(ts => { last = ts; loop(ts); });
-})();
+   
