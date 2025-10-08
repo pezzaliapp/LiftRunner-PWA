@@ -2,10 +2,13 @@
 <html lang="it">
 <head>
   <meta charset="utf-8">
+  <!-- Anti-zoom su iOS (fondamentale anche per doppio-tap) -->
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <title>Lift Runner — PWA Prototype</title>
   <meta name="theme-color" content="#0f172a">
   <link rel="manifest" href="./manifest.webmanifest">
+
+  <!-- iOS PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Lift Runner">
@@ -15,13 +18,18 @@
     :root{
       --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9; --acc:#22c55e; --danger:#ef4444;
     }
-    *{box-sizing:border-box}
-    html,body{height:100%}
+
+    /* Reset + anti-selezione/callout/highlight per iOS */
+    *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+    html,body{ height:100% }
     body{
       margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial;
       color:var(--ink);
       background:radial-gradient(1200px 600px at 60% -10%,#182347,transparent) no-repeat,var(--bg);
       display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px;
+
+      /* Evita selezione/callout iOS su tutta la pagina di gioco */
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
 
     /* ----- HEADER ----- */
@@ -42,8 +50,8 @@
       transition:transform .15s ease;
     }
     .logo-left:hover, .logo-right:hover{ transform:scale(1.08); }
-    header h1{margin:0; font-size:18px; text-align:center; flex:1}
-    header p{margin:6px 0 0; color:var(--muted)}
+    header h1{ margin:0; font-size:18px; text-align:center; flex:1 }
+    header p{ margin:6px 0 0; color:var(--muted) }
 
     /* Tooltip */
     .tooltip{ position:relative; display:inline-flex; align-items:center; }
@@ -73,8 +81,14 @@
       border:1px solid #1d2a55;
       border-radius:12px;
       overflow:hidden;
+
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
-    canvas{display:block; width:100%; height:auto; background:#0a0f25}
+    canvas{
+      display:block; width:100%; height:auto; background:#0a0f25;
+      /* Disattiva gesture zoom/pan su elementi interattivi (iOS/Android) */
+      touch-action: manipulation;
+    }
     #hud{
       display:flex; justify-content:space-between;
       padding:8px 12px;
@@ -82,28 +96,28 @@
       color:var(--muted);
       font-size:14px;
     }
-    kbd{background:#151c3b; border:1px solid #2a3a7a; border-bottom-width:2px; padding:2px 6px; border-radius:6px; color:#e6edff}
+    kbd{
+      background:#151c3b; border:1px solid #2a3a7a; border-bottom-width:2px;
+      padding:2px 6px; border-radius:6px; color:#e6edff
+    }
     .btn{
-      appearance:none; border:1px solid #254;
+      appearance:none; -webkit-appearance:none;
+      border:1px solid #254;
       background:#173; color:#eaffef;
       border-radius:8px; padding:6px 10px;
       cursor:pointer;
+      /* Anti-zoom doppio tap su iOS */
+      touch-action: manipulation;
+      -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
-    .btn:active{transform:translateY(1px)}
+    .btn:active{ transform:translateY(1px) }
 
-    footer{color:var(--muted); font-size:13px}
+    footer{ color:var(--muted); font-size:13px }
 
     /* 🔒 Nasconde la descrizione su TUTTI gli smartphone/tablet */
     @media (max-width:900px){
       header p{ display:none !important; }
     }
-    /* iOS: niente selezione/callout evidenziamento su tutta l'area di gioco */
-#gamewrap, #padBar, .padBtn, body {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
-}
   </style>
 </head>
 
@@ -138,7 +152,7 @@
     <div id="hud">
       <div>⏱️ <span id="time">0.0</span>s &nbsp; | &nbsp; 🏁 Score: <span id="score">0</span></div>
       <div>
-        <button id="liftBtn" class="btn" title="Usa sollevatore (L)">LIFT</button>
+        <button id="liftBtn" class="btn" title="Lift / Jump">LIFT/JUMP</button>
         <button id="pauseBtn" class="btn" title="Pausa/Resume (P)">Pausa</button>
       </div>
     </div>
@@ -201,6 +215,23 @@
       }
     });
   })();
+  </script>
+
+  <!-- iOS: blocca zoom su tap ripetuti dei bottoni HUD -->
+  <script>
+    (function(){
+      const liftBtn = document.getElementById('liftBtn');
+      const pauseBtn = document.getElementById('pauseBtn');
+      [liftBtn, pauseBtn].forEach(btn=>{
+        if(!btn) return;
+        btn.addEventListener('touchstart', e => {
+          // Previene il doppio-tap zoom di Safari
+          e.preventDefault();
+          // Propaga un click “finto” per non interferire con app.js
+          btn.click();
+        }, {passive:false});
+      });
+    })();
   </script>
 
   <script src="./app.js"></script>
