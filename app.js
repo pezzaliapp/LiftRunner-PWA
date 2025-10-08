@@ -1,10 +1,9 @@
-/* Lift Runner — v3.0 (bonus, livelli, nuovi ostacoli)
- * - Bonus collezionabili: +100 (verde), +500 (blu), +1000 (viola)
- * - Nuovi ostacoli: blocchi rossi + tumbleweed (cespuglio che rotola)
- * - UFO scenico (non collide), a volte lascia un bonus
- * - Progressione 3 livelli (Notte → Alba → Deserto) con palette e spawn diversi
- * - D-pad DOM SOLO su mobile; tastiera su desktop
- * - Auto-lift, turbo, suoni, score + best (localStorage)
+/* Lift Runner — v3.3
+ * Additions:
+ * - Combo: 3 bonus entro 8s → x2 al 3° e ai successivi finché non scade la finestra
+ * - Turbo bar: energia si consuma/ricarica, Turbo bloccato a 0
+ * - NPC su lift (donna con bambino) random: se sali su un lift occupato → GAME OVER
+ * - Mantiene: bonus, livelli, tumbleweed, UFO, D-pad mobile, auto-lift, suoni, score/best
  */
 
 (() => {
@@ -19,19 +18,13 @@
   const pauseBtn= document.getElementById('pauseBtn');
   const wrap    = document.getElementById('gamewrap');
 
-  // Mobile detection
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-  // iPhone: evita gesture/zoom sul canvas
   canvas.style.touchAction = 'none';
-
-  // Focus tastiera su desktop
-  canvas.tabIndex = 0;
-  const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
+  canvas.tabIndex = 0; const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
   window.addEventListener('load', focusCanvas);
   canvas.addEventListener('pointerdown', focusCanvas);
 
-  // ===== World base =====
+  // ===== World =====
   const LANES = 3;
   const laneGap = 32;
   const levelY = { low: H - 120, high: H - 320 };
@@ -49,11 +42,12 @@
 
   // Entities
   const obstacles = []; // {type:'block'|'bush', x,y,w,h,level,lane,speed,theta?,scored?}
-  const lifts     = []; // {x,y,w,h,dir:'up'|'down',active,alignedLane}
+  const lifts     = []; // {x,y,w,h,dir:'up'|'down',active,alignedLane,npc?:'family',blink?:number}
   const bonuses   = []; // {x,y,w,h,level,lane,points,active,ttl}
   const ufos      = []; // {x,y,w,h,speed,t}
+  const floats    = []; // floating texts: {x,y,text,ttl}
 
-  // ===== Audio (WebAudio) =====
+  // ===== Audio =====
   let actx=null, muted=false;
   const ensureAudio=()=>{ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch{} } };
   const blip=(f=660, d=0.07, g=0.10, type='square')=>{
@@ -80,10 +74,11 @@
     v.gain.value=0.20; v.gain.exponentialRampToValueAtTime(0.0001,t+0.25);
     s.buffer=b; s.connect(v).connect(actx.destination); s.start(t);
   };
-  const bonusChime = (pts)=>{
+  const bonusChime = (pts, x2=false)=>{
     ensureAudio(); if(!actx || muted) return;
+    if (x2) { sweep(620,1500,0.25,0.09); return; }
     if (pts>=1000) sweep(520,1400,0.25,0.08);
-    else if (pts>=500){ blip(900,0.05,0.08,'triangle'); setTimeout(()=>blip(680,0.06,0.08,'triangle'),50); }
+    else if (pts>=500){ blip(900,0.05,0.08,'triangle'); setTimeout(()=>blip(680,0.06,0.08,'triangle'),60); }
     else blip(780,0.06,0.07,'square');
   };
   const levelUpSound = ()=>{ sweep(360,960,0.35,0.09); setTimeout(()=>blip(1020,0.05,0.08,'triangle'),200); };
@@ -101,29 +96,27 @@
 
   // ===== Palette & Stages =====
   const STAGES = {
-    1: { name:'LEVEL 1 — NOTTE', sky:'#0b1022', star:'#1d2a55', road:'#0f1834', dash:'#223069' },
-    2: { name:'LEVEL 2 — ALBA',  sky:'#1b1230', star:'#fdc1c1', road:'#2a1a3f', dash:'#ca6bee' },
+    1: { name:'LEVEL 1 — NOTTE',   sky:'#0b1022', star:'#1d2a55', road:'#0f1834', dash:'#223069' },
+    2: { name:'LEVEL 2 — ALBA',    sky:'#1b1230', star:'#fdc1c1', road:'#2a1a3f', dash:'#ca6bee' },
     3: { name:'LEVEL 3 — DESERTO', sky:'#231a10', star:'#ffea96', road:'#3b2a14', dash:'#d1a15a' }
   };
   let stage = 1;
-  let stageMsg = { text:'', t:0 }; // overlay fade timer
+  let stageMsg = { text:'', t:0 };
 
   function setStage(n){
     stage = n;
-    stageMsg = { text: STAGES[stage].name, t: 1.8 }; // 1.8s overlay
+    stageMsg = { text: STAGES[stage].name, t: 1.8 };
     levelUpSound();
   }
 
   // ===== Spawn =====
   function spawnObstacle(){
-    // type: block (rosso) o bush (tumbleweed) in base allo stage
     const level = Math.random()<0.5 ? 'low' : 'high';
     const lane  = Math.floor(Math.random()*LANES);
     const lastX = obstacles.length ? obstacles[obstacles.length-1].x : W;
     const minGapX = 140 + Math.random()*90;
     const typeRoll = Math.random();
     const type = (stage>=3 && typeRoll<0.35) ? 'bush' : (typeRoll<0.85 ? 'block' : 'bush');
-
     const baseY = (level==='low'? levelY.low : levelY.high) - lane*laneGap - 6;
     const obj = {
       type, level, lane,
@@ -133,7 +126,7 @@
       speed: BASE_SCROLL + Math.random()*1.2 + (stage-1)*0.3,
       scored:false
     };
-    if (type==='bush') obj.theta = Math.random()*Math.PI*2; // angolo
+    if (type==='bush') obj.theta = Math.random()*Math.PI*2;
     obstacles.push(obj);
   }
 
@@ -141,32 +134,33 @@
     const lane=1, yBase=(dir==='up'? levelY.low : levelY.high);
     const lastX = lifts.length ? lifts[lifts.length-1].x : W;
     const gap = 260 + Math.random()*160;
-    lifts.push({
+    const L = {
       x: Math.max(W+160, lastX+gap),
       y: yBase - lane*laneGap - 6,
       w: 140, h: 16, dir, active: true, alignedLane: lane
-    });
+    };
+    // 12% di probabilità che sia occupato da "donna con bambino"
+    if (Math.random() < 0.12) {
+      L.npc = 'family';
+      L.blink = 0; // per lampeggio visivo
+    }
+    lifts.push(L);
   }
 
   function spawnBonus(points){
-    // lane casuale sul piano attuale dell'oggetto/giocatore (più utile)
     const lvl = Math.random()<0.5 ? 'low' : 'high';
     const lane = Math.floor(Math.random()*LANES);
     const x = W + 200 + Math.random()*400;
     const y = (lvl==='low'? levelY.low : levelY.high) - lane*laneGap - 14;
-    bonuses.push({
-      x, y, w: 18, h: 18, level: lvl, lane, points, active:true, ttl: 8 // s di vita max
-    });
+    bonuses.push({ x, y, w: 18, h: 18, level: lvl, lane, points, active:true, ttl: 8 });
   }
 
   function spawnUFO(){
-    // ufo passa sopra il piano alto, non collide
     const y = levelY.high - laneGap*2 - 70 + Math.random()*30;
     ufos.push({ x: W + 40, y, w: 60, h: 24, speed: 2.2 + Math.random()*1.0, t:0 });
     ufoSound();
   }
 
-  // Precarico
   for(let i=0;i<3;i++) spawnObstacle();
   spawnLift('up'); spawnLift('down');
 
@@ -174,6 +168,17 @@
   let running=false, paused=false;
   let last=performance.now(), elapsed=0, score=0;
   let best = +localStorage.getItem('liftRunnerBest') || 0;
+
+  // Combo
+  let comboCount = 0;         // bonus consecutivi
+  let comboTimer = 0;         // tempo rimanente per mantenere la combo
+  const COMBO_WINDOW = 8.0;   // secondi
+  let comboFlash = 0;         // per HUD anim
+
+  // Turbo energy
+  let turboEnergy = 100;      // 0..100
+  const TURBO_USE = 28;       // consumo %/s
+  const TURBO_REGEN = 18;     // ricarica %/s
 
   // ===== Keyboard =====
   const keys=Object.create(null);
@@ -185,25 +190,24 @@
     if(c==='KeyP') togglePause();
     if(c==='KeyL') manualLift();
     if(c==='KeyM') muted=!muted;
-    if(c==='Space') { player.turboOn=true; blip(460,0.04,0.06,'triangle'); }
+    if(c==='Space') { player.turboOn=true; }
     if(c==='KeyR' && !player.alive) toStart();
   },{passive:false});
   window.addEventListener('keyup',e=>{
     const c=e.code||e.key; keys[c]=false;
     if(handled.has(c)) e.preventDefault();
-    if(c==='Space') { player.turboOn=false; blip(260,0.05,0.05,'triangle'); }
+    if(c==='Space') { player.turboOn=false; }
   },{passive:false});
 
   if(liftBtn)  liftBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); manualLift(); if(!running) startGame(); });
   if(pauseBtn) pauseBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); togglePause(); });
 
-  // ===== D-pad DOM: SOLO MOBILE =====
+  // ===== D-pad DOM (mobile) =====
   let holdLeft=false, holdRight=false, holdTurbo=false;
   if (isMobile) createPadDOM();
 
   function createPadDOM(){
     if (!wrap) return;
-
     const css = document.createElement('style');
     css.textContent = `
       #padBar{display:flex;justify-content:space-between;gap:16px;padding:10px 12px;background:#0d1330;border-top:1px solid #1d2a55}
@@ -216,13 +220,10 @@
       .padCluster .spacer{visibility:hidden}
       .padRight{display:grid;grid-auto-flow:row;gap:8px}
       .padLabel{display:block;font:600 11px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#9fb0d9;margin-top:2px}
-      @media (min-width: 880px){ #padBar{padding:12px 16px} .padBtn{width:60px;height:60px} .padCluster{grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px} }
     `;
     document.head.appendChild(css);
 
-    const bar = document.createElement('div');
-    bar.id = 'padBar';
-
+    const bar = document.createElement('div'); bar.id = 'padBar';
     const left = document.createElement('div');
     left.className = 'padCluster';
     left.innerHTML = `
@@ -233,55 +234,46 @@
       <button id="padDown" class="padBtn" aria-label="Giù">↓</button>
       <button id="padRight" class="padBtn" aria-label="Destra">→</button>
     `;
-
     const right = document.createElement('div');
     right.className = 'padRight';
     right.innerHTML = `
       <button id="padA" class="padBtn small" aria-label="Lift">A</button><span class="padLabel">LIFT</span>
       <button id="padB" class="padBtn small" aria-label="Turbo">B</button><span class="padLabel">TURBO</span>
     `;
+    bar.appendChild(left); bar.appendChild(right);
+    const hud = document.getElementById('hud'); wrap.insertBefore(bar, hud);
 
-    bar.appendChild(left);
-    bar.appendChild(right);
-
-    const hud = document.getElementById('hud');
-    wrap.insertBefore(bar, hud);
-
-    const btnUp    = bar.querySelector('#padUp');
-    const btnDown  = bar.querySelector('#padDown');
-    const btnLeft  = bar.querySelector('#padLeft');
-    const btnRight = bar.querySelector('#padRight');
-    const btnA     = bar.querySelector('#padA');
-    const btnB     = bar.querySelector('#padB');
+    const btnUp=bar.querySelector('#padUp'), btnDown=bar.querySelector('#padDown');
+    const btnLeft=bar.querySelector('#padLeft'), btnRight=bar.querySelector('#padRight');
+    const btnA=bar.querySelector('#padA'), btnB=bar.querySelector('#padB');
 
     const down = (e)=>{ e.preventDefault(); ensureAudio(); actx&&actx.resume&&actx.resume(); if(!running) startGame(); };
 
     btnUp.addEventListener('pointerdown',   e=>{ down(e); laneUp(); blip(760,0.05,0.06); });
     btnDown.addEventListener('pointerdown', e=>{ down(e); laneDown(); blip(540,0.05,0.06); });
-
     btnLeft.addEventListener('pointerdown', e=>{ down(e); holdLeft=true; });
     btnRight.addEventListener('pointerdown',e=>{ down(e); holdRight=true; });
     ['pointerup','pointercancel','pointerleave'].forEach(t=>{
       btnLeft.addEventListener(t, ()=>{ holdLeft=false; }, {passive:true});
       btnRight.addEventListener(t,()=>{ holdRight=false;}, {passive:true});
     });
-
     btnA.addEventListener('pointerdown', e=>{ down(e); manualLift(); });
-
-    btnB.addEventListener('pointerdown', e=>{ down(e); holdTurbo=true; blip(460,0.04,0.06,'triangle'); });
+    btnB.addEventListener('pointerdown', e=>{ down(e); holdTurbo=true; });
     ['pointerup','pointercancel','pointerleave'].forEach(t=>{
-      btnB.addEventListener(t, ()=>{ if (holdTurbo){ holdTurbo=false; blip(260,0.05,0.05,'triangle'); }}, {passive:true});
+      btnB.addEventListener(t, ()=>{ holdTurbo=false; }, {passive:true});
     });
   }
 
   // ===== Start / Pause =====
   function startGame(){
     running=true; paused=false; last=performance.now(); elapsed=0; score=0;
-    obstacles.length=0; lifts.length=0; bonuses.length=0; ufos.length=0;
+    obstacles.length=0; lifts.length=0; bonuses.length=0; ufos.length=0; floats.length=0;
     for(let i=0;i<3;i++) spawnObstacle();
     spawnLift('up'); spawnLift('down');
     Object.assign(player,{ x:120, level:'low', lane:1, alive:true, lifting:false, turboOn:false });
     setStage(1);
+    comboCount=0; comboTimer=0; comboFlash=0;
+    turboEnergy=100;
     blip(520,0.08,0.08); blip(780,0.08,0.07);
   }
   function toStart(){ running=false; paused=false; }
@@ -306,6 +298,14 @@
   }
   function manualLift(){ const L=eligibleLift(); if(L) startLift(L); }
   function startLift(L){
+    // Se occupato da "donna con bambino" → game over immediato
+    if (L.npc === 'family') {
+      // piccolo lampeggio visivo e suono di crash
+      L.blink = 0.6;
+      player.alive = false; running = false; crash();
+      floats.push({ x: L.x+L.w/2, y: L.y-10, text:'LIFT OCCUPATO!', ttl:1.4 });
+      return;
+    }
     player.lifting=true;
     const delta=(levelY.low - levelY.high)*(L.dir==='up'?1:-1);
     liftAnim={ t:0, fromY:player.y, toY:player.y - delta };
@@ -325,23 +325,30 @@
 
   // ===== Update =====
   function update(dt){
-    // Turbo e velocità
-    const keyboardTurbo = !!keys['Space'];
-    const turbo = player.turboOn || keyboardTurbo || holdTurbo;
-    const targetSpeed = turbo ? player.turbo : player.speed;
+    // Turbo energy management
+    const wantTurbo = player.turboOn || !!keys['Space'] || (isMobile && holdTurbo);
+    if (wantTurbo && turboEnergy > 1) {
+      turboEnergy = Math.max(0, turboEnergy - TURBO_USE * dt);
+      if (!player._turboWasOn) { blip(460,0.04,0.06,'triangle'); player._turboWasOn=true; }
+    } else {
+      turboEnergy = Math.min(100, turboEnergy + TURBO_REGEN * dt);
+      if (player._turboWasOn) { blip(260,0.05,0.05,'triangle'); player._turboWasOn=false; }
+    }
+    const turboActive = wantTurbo && turboEnergy > 1;
+    const targetSpeed = turboActive ? player.turbo : player.speed;
 
-    // Movimento X
+    // Movement X
     const right = keys['ArrowRight']||keys['KeyD']||holdRight;
     const left  = keys['ArrowLeft'] ||keys['KeyA']||holdLeft;
     player.vx = right ? 1 : left ? -1 : 0;
     player.x += player.vx * 180 * dt;
     player.x = Math.max(40, Math.min(W*0.62, player.x));
 
-    // Cambio corsia tastiera
+    // Lane change (keyboard)
     if((keys['ArrowUp']||keys['KeyW']) && !player.lifting){ laneUp(); keys['ArrowUp']=keys['KeyW']=false; blip(760,0.05,0.06); }
     if((keys['ArrowDown']||keys['KeyS']) && !player.lifting){ laneDown(); keys['ArrowDown']=keys['KeyS']=false; blip(540,0.05,0.06); }
 
-    // Y / lift anim
+    // Y / lift
     if(!player.lifting){
       const base=(player.level==='low')?levelY.low:levelY.high;
       const targetY= base - player.lane*laneGap - (player.h/2);
@@ -354,12 +361,12 @@
       if(liftAnim.t>=1){ player.lifting=false; player.level=(player.level==='low')?'high':'low'; liftAnim=null; }
     }
 
-    // Auto-lift
+    // Auto-lift window
     const L=eligibleLift();
     if(L){ if(!eligibleSince) eligibleSince=performance.now(); else if(performance.now()-eligibleSince>=AUTO_LIFT_DELAY) startLift(L); }
     else { eligibleSince=0; }
 
-    // Spawning dinamico per stage
+    // Spawning dinamico
     if (obstacles.length < 5 && Math.random() < (0.06 + (stage-1)*0.01)) spawnObstacle();
     const upC=lifts.filter(l=>l.dir==='up').length, dnC=lifts.filter(l=>l.dir==='down').length;
     if(upC<2 && Math.random()<0.10) spawnLift('up');
@@ -372,54 +379,74 @@
       else if (bonusRoll < 0.013) spawnBonus(500);
       else if (bonusRoll < 0.014) spawnBonus(1000);
     }
-    // UFO spawn (più probabile dal level 2)
+    // UFO spawn
     if (Math.random() < (stage>=2 ? 0.0025 : 0.0012) && ufos.length < 1) spawnUFO();
 
-    // Update ostacoli
+    // Update obstacles
     for(const o of obstacles){
       const boost = (player.level===o.level ? targetSpeed*0.45 : targetSpeed*0.25);
       o.x -= (o.speed + boost) * dt * 60;
       if (o.type==='bush') {
-        o.theta += dt * 6.5; // rotola
-        // piccola oscillazione verticale
+        o.theta += dt * 6.5;
         o.y += Math.sin(o.theta*2) * 0.2;
       }
-      // Sorpasso
       if(!o.scored && o.x + o.w < player.x){ o.scored=true; score+=5; blip(900,0.05,0.05,'triangle'); }
     }
 
-    // Update lifts
-    for(const L2 of lifts){ L2.x -= (BASE_SCROLL + 1.1 + (turbo?0.4:0)) * dt * 60; }
-
-    // Update bonuses
-    for (const b of bonuses){
-      b.x -= (BASE_SCROLL + 1.2) * dt * 60;
-      b.ttl -= dt;
-      if (b.level === player.level && b.active && overlapRelaxed(player,b,-4)){
-        b.active = false;
-        score += b.points;
-        bonusChime(b.points);
+    // Update lifts (blink se NPC)
+    for(const L2 of lifts){
+      L2.x -= (BASE_SCROLL + 1.1 + (turboActive?0.4:0)) * dt * 60;
+      if (L2.npc === 'family' && L2.blink != null) {
+        L2.blink = Math.max(0, L2.blink - dt);
       }
     }
 
-    // Update UFOs (scenici)
+    // Update bonuses + COMBO
+    // Decadimento combo
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) { comboCount = 0; } }
+
+    for (const b of bonuses){
+      b.x -= (BASE_SCROLL + 1.2) * dt * 60;
+      b.ttl -= dt;
+
+      if (b.level === player.level && b.active && overlapRelaxed(player,b,-4)){
+        b.active = false;
+
+        // combo logic: il 3° e successivi entro la finestra → x2
+        let points = b.points;
+        let isX2 = false;
+        comboCount += 1;
+        if (comboCount >= 3) { points *= 2; isX2 = true; comboFlash = 0.8; }
+
+        comboTimer = COMBO_WINDOW; // reset finestra
+        score += points;
+
+        bonusChime(b.points, isX2);
+        floats.push({ x: b.x, y: b.y, text: `+${points}${isX2?' COMBO':''}`, ttl: 1.2 });
+      }
+    }
+
+    // Update UFOs
     for (const u of ufos){
-      u.x -= (u.speed + (turbo?0.1:0)) * dt * 60;
+      u.x -= (u.speed + (turboActive?0.1:0)) * dt * 60;
       u.t += dt;
-      // a volte lascia un bonus che cade (semplifichiamo: spawna bonus in corsia casuale)
       if (stage>=3 && Math.random()<0.005){
         const pts = (Math.random()<0.5?100:500);
         spawnBonus(pts);
       }
     }
 
+    // Update floating texts
+    for (const f of floats){ f.y -= 12 * dt; f.ttl -= dt; }
+
     // Cleanup
     for(let i=obstacles.length-1;i>=0;i--) if(obstacles[i].x + obstacles[i].w < -60) obstacles.splice(i,1);
     for(let i=lifts.length-1;i>=0;i--)     if(lifts[i].x + lifts[i].w < -70)       lifts.splice(i,1);
     for(let i=bonuses.length-1;i>=0;i--)   if(bonuses[i].x + bonuses[i].w < -60 || bonuses[i].ttl<=0 || !bonuses[i].active) bonuses.splice(i,1);
     for(let i=ufos.length-1;i>=0;i--)      if(ufos[i].x + ufos[i].w < -80) ufos.splice(i,1);
+    for(let i=floats.length-1;i>=0;i--)    if(floats[i].ttl<=0) floats.splice(i,1);
 
-    // Collisioni con ostacoli (solo stesso piano)
+    // Collisioni con ostacoli
     for(const o of obstacles){
       if(o.level!==player.level) continue;
       if(overlapRelaxed(player,o,-3)){ player.alive=false; running=false; crash(); break; }
@@ -435,14 +462,12 @@
     // Level progression
     if (stage===1 && (elapsed>45 || score>2000)) setStage(2);
     if (stage===2 && (elapsed>90 || score>4500)) setStage(3);
-
-    // Stage overlay timer
     if (stageMsg.t>0) stageMsg.t -= dt;
   }
 
   // ===== Draw =====
   function draw(){
-    // Background per stage
+    // BG per stage
     ctx.fillStyle = STAGES[stage].sky;
     ctx.fillRect(0,0,W,H);
     drawStars(STAGES[stage].star);
@@ -454,21 +479,43 @@
     for(const o of obstacles) drawObstacle(o);
     for(const b of bonuses)   drawBonus(b);
     for(const u of ufos)      drawUFO(u);
+    for(const f of floats)    drawFloat(f);
 
     drawCar(player);
 
-    // HUD in-canvas (tempo/score/best)
+    // HUD in-canvas: time/score/best
     ctx.save();
-    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,190,50);
+    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,210,60);
     ctx.fillStyle='#ecf2ff'; ctx.font='bold 14px system-ui,Segoe UI,Arial';
     ctx.fillText(`⏱ ${elapsed.toFixed(1)}s`, 16, 28);
     ctx.fillText(`🏁 ${score}`, 16, 46);
-    ctx.textAlign='right'; ctx.fillText(`Best: ${best}`, 196, 28);
+    ctx.textAlign='right'; ctx.fillText(`Best: ${best}`, 216, 28);
+
+    // Turbo bar
+    ctx.textAlign='left';
+    ctx.fillText('Turbo', 16, 62);
+    ctx.strokeStyle='#2dd4bf'; ctx.lineWidth=2;
+    ctx.strokeRect(64, 50, 120, 10);
+    ctx.fillStyle='#22c55e';
+    ctx.fillRect(64, 50, 120 * (turboEnergy/100), 10);
     ctx.restore();
 
-    // Stage overlay (fade)
+    // Combo HUD (se attivo)
+    if (comboCount >= 2 || comboTimer > 0){
+      const a = comboFlash>0 ? Math.min(1, comboFlash/0.8) : Math.max(0.3, comboTimer/COMBO_WINDOW);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle='#ffd166';
+      ctx.font='bold 18px system-ui,Segoe UI,Arial';
+      ctx.textAlign='center';
+      ctx.fillText(`COMBO ${comboCount >= 3 ? 'x2!' : `${comboCount}/3`}`, W/2, 36);
+      ctx.restore();
+      if (comboFlash>0) comboFlash -= 0.05;
+    }
+
+    // Stage overlay
     if (stageMsg.t>0){
-      const a = Math.min(1, stageMsg.t / 0.8); // fade out
+      const a = Math.min(1, stageMsg.t / 0.8);
       ctx.save();
       ctx.globalAlpha = a;
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -501,6 +548,15 @@
     }
   }
 
+  function drawFloat(f){
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, f.ttl/1.2);
+    ctx.fillStyle='#ecf2ff';
+    ctx.font='bold 14px system-ui,Segoe UI,Arial';
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.restore();
+  }
+
   function drawRoad(yBase, road='#0f1834', dash='#223069'){
     ctx.fillStyle=road; ctx.fillRect(0,yBase,W,roadH);
     ctx.strokeStyle=dash; ctx.lineWidth=2;
@@ -510,34 +566,57 @@
     }
   }
   function drawLift(L){
-    ctx.fillStyle=L.active?'#2dd36f':'#2a7a54'; ctx.fillRect(L.x,L.y,L.w,L.h);
+    const occupied = L.npc === 'family';
+    // base/platform color
+    if (occupied){
+      // lampeggia rosso se blink attivo, altrimenti rosso scuro
+      const blinkOn = L.blink && Math.floor(performance.now()/120)%2===0;
+      ctx.fillStyle = blinkOn ? '#ff5a5a' : '#7a2b2b';
+    } else {
+      ctx.fillStyle=L.active?'#2dd36f':'#2a7a54';
+    }
+    ctx.fillRect(L.x,L.y,L.w,L.h);
+    // piloni
     ctx.fillStyle='#1b254d';
     ctx.fillRect(L.x+6, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
     ctx.fillRect(L.x+L.w-14, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
-    ctx.fillStyle='#eaffef'; const cx=L.x+L.w/2, cy=L.y+L.h/2;
+
+    // direzione
+    ctx.fillStyle='#eaffef';
+    const cx=L.x+L.w/2, cy=L.y+L.h/2;
     ctx.beginPath();
-    if(L.dir==='up'){ ctx.moveTo(cx,cy-6); ctx.lineTo(cx-6,cy+4); ctx.lineTo(cx+6,cy+4); }
+    const dirUp = L.dir==='up';
+    if(dirUp){ ctx.moveTo(cx,cy-6); ctx.lineTo(cx-6,cy+4); ctx.lineTo(cx+6,cy+4); }
     else { ctx.moveTo(cx,cy+6); ctx.lineTo(cx-6,cy-4); ctx.lineTo(cx+6,cy-4); }
     ctx.closePath(); ctx.fill();
+
+    // NPC: “donna con bambino”
+    if (occupied){
+      const px = L.x + L.w*0.75, py = L.y - 2;
+      ctx.save();
+      ctx.strokeStyle='#ffe6e6'; ctx.lineWidth=2;
+      // figura adulta
+      ctx.beginPath(); ctx.arc(px, py-10, 5, 0, Math.PI*2); ctx.stroke(); // testa
+      ctx.beginPath(); ctx.moveTo(px, py-5); ctx.lineTo(px, py+10); ctx.stroke(); // corpo
+      ctx.beginPath(); ctx.moveTo(px, py+10); ctx.lineTo(px-5, py+18); ctx.moveTo(px, py+10); ctx.lineTo(px+5, py+18); ctx.stroke(); // gambe
+      // bambino accanto
+      const cx = px-12, cy = py-2;
+      ctx.beginPath(); ctx.arc(cx, cy-6, 3.2, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy-2); ctx.lineTo(cx, cy+8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy+8); ctx.lineTo(cx-3, cy+14); ctx.moveTo(cx, cy+8); ctx.lineTo(cx+3, cy+14); ctx.stroke();
+      ctx.restore();
+    }
   }
   function drawObstacle(o){
     if (o.type==='block'){
       ctx.fillStyle='#ef4444'; ctx.fillRect(o.x,o.y,o.w,o.h);
       ctx.fillStyle='#ffd4d4'; ctx.fillRect(o.x+4,o.y+4,o.w-8,6);
     } else {
-      // tumbleweed (cespuglio che rotola)
-      const r = o.w/2;
-      const cx = o.x + r, cy = o.y + r;
-      ctx.save();
-      ctx.translate(cx,cy);
-      ctx.rotate(o.theta||0);
-      ctx.fillStyle='#c59b6d';
-      ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
+      const r = o.w/2, cx = o.x + r, cy = o.y + r;
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(o.theta||0);
+      ctx.fillStyle='#c59b6d'; ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2); ctx.fill();
       ctx.strokeStyle='#7a5c36'; ctx.lineWidth=2;
-      for(let i=0;i<6;i++){
-        const a=i*Math.PI/3;
-        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r); ctx.stroke();
-      }
+      for(let i=0;i<6;i++){ const a=i*Math.PI/3; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r); ctx.stroke(); }
       ctx.restore();
     }
   }
@@ -545,20 +624,15 @@
     const color = b.points>=1000 ? '#a78bfa' : (b.points>=500 ? '#60a5fa' : '#22c55e');
     ctx.fillStyle = color;
     ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI*2); ctx.fill();
-    // piccolo bagliore
     ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2 + 2, 0, Math.PI*2); ctx.stroke();
   }
   function drawUFO(u){
-    ctx.save();
-    ctx.translate(u.x, u.y);
-    // scodella
+    ctx.save(); ctx.translate(u.x, u.y);
     ctx.fillStyle='#8ab4ff'; ctx.beginPath();
     ctx.ellipse(0,0, u.w*0.5, u.h*0.38, 0, 0, Math.PI*2); ctx.fill();
-    // cupola
     ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.beginPath();
     ctx.ellipse(-4,-8, u.w*0.25, u.h*0.28, 0, 0, Math.PI*2); ctx.fill();
-    // lucine
     ctx.fillStyle='#ffd166';
     for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.arc(i*10, 8, 3, 0, Math.PI*2); ctx.fill(); }
     ctx.restore();
@@ -581,7 +655,6 @@
     const dt=Math.min(0.033,(now-last)/1000); last=now;
     if(running && !paused && player.alive) update(dt);
     draw();
-    // HUD DOM (se presente)
     if (timeEl)  timeEl.textContent  = elapsed.toFixed(1);
     if (scoreEl) scoreEl.textContent = String(score);
     requestAnimationFrame(loop);
