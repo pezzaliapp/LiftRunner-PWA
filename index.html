@@ -97,6 +97,13 @@
     @media (max-width:900px){
       header p{ display:none !important; }
     }
+    /* iOS: niente selezione/callout evidenziamento su tutta l'area di gioco */
+#gamewrap, #padBar, .padBtn, body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
   </style>
 </head>
 
