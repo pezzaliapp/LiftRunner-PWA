@@ -1,26 +1,28 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="utf-8">
-  <!-- Anti-zoom iOS -->
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta charset="utf-8" />
+  <!-- iOS/Android: blocca lo zoom manuale e il reflow automatico del testo -->
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="format-detection" content="telephone=no" />
   <title>Lift Runner — PWA Prototype</title>
-  <meta name="theme-color" content="#0f172a">
-  <link rel="manifest" href="./manifest.webmanifest">
+
+  <!-- PWA -->
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="manifest" href="./manifest.webmanifest" />
 
   <!-- iOS PWA -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Lift Runner">
-  <meta name="format-detection" content="telephone=no">
-  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Lift Runner" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
 
   <style>
     :root{
       --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9; --acc:#22c55e; --danger:#ef4444;
     }
 
-    /* Reset + anti selezione / zoom */
+    /* Reset + anti evidenziazione mobile */
     *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
     html{ height:100%; -webkit-text-size-adjust:100%; }
     body{
@@ -29,6 +31,7 @@
       background:radial-gradient(1200px 600px at 60% -10%,#182347,transparent) no-repeat,var(--bg);
       display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px;
 
+      /* iOS: niente selezione/callout ovunque nell’area della pagina */
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
 
@@ -48,7 +51,7 @@
     header h1{ margin:0; font-size:18px; text-align:center; flex:1 }
     header p{ margin:6px 0 0; color:var(--muted) }
 
-    /* Tooltip */
+    /* Tooltip desktop + fallback mobile */
     .tooltip{ position:relative; display:inline-flex; align-items:center; }
     .tooltip-text{
       position:absolute; right:0; top:100%; transform:translateY(8px);
@@ -69,11 +72,14 @@
       width:100%; max-width:920px; background:#0a0f25;
       border:1px solid #1d2a55; border-radius:12px; overflow:hidden;
 
+      /* iOS: niente selezione/callout */
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
     canvas{
       display:block; width:100%; height:auto; background:#0a0f25;
-      touch-action:manipulation; /* evita doppio-tap zoom/pinch su iOS/Android */
+
+      /* Evita doppio-tap zoom e gesture interferenti sull’area di gioco */
+      touch-action:manipulation;
     }
     #hud{
       display:flex; justify-content:space-between; align-items:center;
@@ -87,43 +93,47 @@
       appearance:none; -webkit-appearance:none;
       border:1px solid #254; background:#173; color:#eaffef;
       border-radius:8px; padding:8px 12px; cursor:pointer; line-height:1;
-      /* Anti-zoom testo piccolo su iOS: */
+      /* iOS: font >= 16px per evitare auto-zoom sui tap */
       font-size:16px;
       touch-action:manipulation; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
     .btn:active{ transform:translateY(1px) }
     footer{ color:var(--muted); font-size:13px }
 
-    /* Nasconde la descrizione su smartphone/tablet */
+    /* Smartphone/tablet: nasconde la descrizione per più spazio */
     @media (max-width:900px){ header p{ display:none !important; } }
 
-    /* Anti-selezione e anti-zoom anche per i pulsanti del D-pad DOM
-       (creati da app.js con id #padBar e classe .padBtn) */
+    /* Anti-selezione e anti-zoom anche per i pulsanti del D-pad creati da app.js */
     #padBar, .padBtn{
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
       touch-action:manipulation;
     }
-    .padBtn{ font-size:16px; } /* evita auto-zoom iOS se <16px */
+    .padBtn{ font-size:16px; } /* no auto-zoom su iOS */
   </style>
 </head>
 
 <body>
   <header>
     <div class="header-flex">
+      <!-- Logo sinistro PezzaliAPP -->
       <a href="https://pezzaliapp.com/#giochi" target="_blank" rel="noopener" aria-label="Vai ai giochi PezzaliAPP">
-        <img src="./icons/pezzaliAPP-logo.png" alt="pezzaliAPP" class="logo-left">
+        <img src="./icons/pezzaliAPP-logo.png" alt="pezzaliAPP" class="logo-left" />
       </a>
+
+      <!-- Titolo centrale -->
       <h1>Lift Runner</h1>
+
+      <!-- Tooltip + logo destro KubeApp -->
       <span class="tooltip">
         <a href="https://www.alessandropezzali.it/KubeApp/" target="_blank" rel="noopener" aria-label="Gioca a Il Cubo">
-          <img src="./icons/kubeapp-icon.png" alt="KubeApp" class="logo-right">
+          <img src="./icons/kubeapp-icon.png" alt="KubeApp" class="logo-right" />
         </a>
         <span class="tooltip-text" role="tooltip">Gioca a Il Cubo 🎲</span>
       </span>
     </div>
 
     <p id="intro">
-      Evita gli ostacoli, allinea l’auto su un <strong>sollevatore</strong> e premi <kbd>L</kbd> (o tocca “LIFT”) per salire al piano superiore.<br>
+      Evita gli ostacoli, allinea l’auto su un <strong>sollevatore</strong> e premi <kbd>L</kbd> (o tocca “LIFT”) per salire al piano superiore.<br />
       Comandi: <kbd>←</kbd><kbd>→</kbd> sposta, <kbd>↑</kbd>/<kbd>↓</kbd> cambia corsia, <kbd>Spazio</kbd> turbo.
     </p>
   </header>
@@ -166,46 +176,60 @@
     }
   </script>
 
-  <!-- Tooltip mobile: primo tap mostra tip, secondo apre -->
-  <script>
-  (function(){
-    const tipWrap=document.querySelector('.tooltip'); if(!tipWrap) return;
-    const tip=tipWrap.querySelector('.tooltip-text'); const link=tipWrap.querySelector('a'); let hideTimer=null;
-    function showTipOnce(e){
-      if(window.matchMedia('(hover: none)').matches){
-        if(!tipWrap.classList.contains('tip-open')){
-          e.preventDefault();
-          tipWrap.classList.add('tip-open'); tip.style.opacity='1'; tip.style.transform='translateY(4px)';
-          clearTimeout(hideTimer);
-          hideTimer=setTimeout(()=>{ tipWrap.classList.remove('tip-open'); tip.style.opacity=''; tip.style.transform=''; }, 2000);
-        }
-      }
-    }
-    link.addEventListener('click',showTipOnce,{passive:false});
-    document.addEventListener('click',ev=>{
-      if(!tipWrap.contains(ev.target)){ tipWrap.classList.remove('tip-open'); tip.style.opacity=''; tip.style.transform=''; }
-    });
-  })();
-  </script>
-
-  <!-- iOS fixes: blocca doppio-tap zoom + trasforma touch su bottoni HUD in click -->
+  <!-- Tooltip mobile: primo tap mostra la tip, il secondo apre il link -->
   <script>
     (function(){
-      // 1) Doppio-tap zoom globale
-      let lastTouch = 0;
-      document.addEventListener('touchend', function(e){
-        const now = performance.now();
-        if (now - lastTouch < 350) { e.preventDefault(); }
-        lastTouch = now;
-      }, {passive:false});
+      const tipWrap = document.querySelector('.tooltip'); if (!tipWrap) return;
+      const tip = tipWrap.querySelector('.tooltip-text');
+      const link = tipWrap.querySelector('a');
+      let hideTimer = null;
 
-      // 2) Bottoni HUD: no-zoom e click sintetico
-      const synthClick = (btn) => btn && btn.addEventListener('touchstart', e => { e.preventDefault(); btn.click(); }, {passive:false});
-      synthClick(document.getElementById('liftBtn'));
-      synthClick(document.getElementById('pauseBtn'));
+      function showTipOnce(e){
+        if (window.matchMedia('(hover: none)').matches){
+          if (!tipWrap.classList.contains('tip-open')){
+            e.preventDefault();
+            tipWrap.classList.add('tip-open');
+            tip.style.opacity='1'; tip.style.transform='translateY(4px)';
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(()=>{
+              tipWrap.classList.remove('tip-open');
+              tip.style.opacity=''; tip.style.transform='';
+            }, 2000);
+          }
+        }
+      }
+      link.addEventListener('click', showTipOnce, {passive:false});
+      document.addEventListener('click', ev=>{
+        if(!tipWrap.contains(ev.target)){
+          tipWrap.classList.remove('tip-open');
+          tip.style.opacity=''; tip.style.transform='';
+        }
+      });
     })();
   </script>
 
+  <!-- iOS fixes: blocca doppio-tap zoom nelle aree interattive + sintetizza click su HUD -->
+  <script>
+    (function(){
+      // 1) Doppio-tap zoom: blocca solo su aree interattive (gioco + HUD + D-pad)
+      const interactiveSel = '#gamewrap, #hud, #padBar, .padBtn, #liftBtn, #pauseBtn, canvas';
+      let lastTouch = 0;
+      document.addEventListener('touchend', function(e){
+        const target = e.target.closest(interactiveSel);
+        if (!target) return;
+        const now = performance.now();
+        if (now - lastTouch < 350) { e.preventDefault(); } // blocca lo zoom del secondo tap
+        lastTouch = now;
+      }, {passive:false});
+
+      // 2) Trasforma touch in click nativo sui bottoni HUD (evita delay/zoom)
+      const asClick = (el)=> el && el.addEventListener('touchstart', ev => { ev.preventDefault(); el.click(); }, {passive:false});
+      asClick(document.getElementById('liftBtn'));
+      asClick(document.getElementById('pauseBtn'));
+    })();
+  </script>
+
+  <!-- Gioco -->
   <script src="./app.js"></script>
 </body>
 </html>
