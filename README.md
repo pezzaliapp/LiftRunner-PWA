@@ -22,7 +22,7 @@ Lift Runner è molto più di un semplice arcade:
 è una metafora del **tempo, del rischio e delle decisioni rapide**.  
 Il giocatore deve scegliere quando salire o restare, quando rischiare un turbo o attendere un’apertura, quando fidarsi di un "ghost lift" o evitare un ostacolo che rotola all’improvviso.
 
-Come nella vita — e nelle vendite, — ogni errore costa tempo, ma ogni riflesso giusto moltiplica il punteggio.
+Come nelle vendite — e nella vita — ogni errore rallenta, ma ogni riflesso giusto ti fa avanzare
 
 ---
 
