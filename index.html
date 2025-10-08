@@ -6,9 +6,17 @@
   <title>Lift Runner — PWA Prototype</title>
   <meta name="theme-color" content="#0f172a">
   <link rel="manifest" href="./manifest.webmanifest">
+
+  <!-- Icone PWA -->
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lift Runner">
+
   <style>
     :root{
-      --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9; --acc:#22c55e; --danger:#ef4444;
+      --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9;
+      --acc:#22c55e; --danger:#ef4444;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -19,7 +27,7 @@
       display:flex; flex-direction:column; align-items:center; gap:10px; padding:16px;
     }
     header{width:100%; max-width:920px; background:var(--card); border:1px solid #1d2a55; border-radius:12px; padding:12px 16px}
-    header h1{margin:0; font-size:18px}
+    header h1{margin:0; font-size:18px; display:inline-block; vertical-align:middle;}
     header p{margin:6px 0 0; color:var(--muted)}
     #gamewrap{width:100%; max-width:920px; background:#0a0f25; border:1px solid #1d2a55; border-radius:12px; overflow:hidden}
     canvas{display:block; width:100%; height:auto; background:#0a0f25}
@@ -29,20 +37,61 @@
     .btn{appearance:none; border:1px solid #254; background:#173; color:#eaffef; border-radius:8px; padding:6px 10px; cursor:pointer}
     .btn:active{transform:translateY(1px)}
 
-    /* ===== Mobile compact (iPhone SE & simili) ===== */
-    @media (max-width: 440px) {
-      header { padding:10px 12px }
-      header p { display:none }         /* Nasconde le istruzioni */
-      body { padding:10px }
-      #hud { font-size:13px; padding:8px 10px }
-      footer { font-size:12px }
+    /* Header con loghi */
+    .header-flex{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px;
+    }
+    .logo-left{
+      width:42px; height:42px; border-radius:8px; object-fit:contain;
+    }
+    .logo-right{
+      width:38px; height:38px; border-radius:6px; object-fit:contain; cursor:pointer;
+    }
+
+    /* Tooltip per mini-logo */
+    .tooltip{
+      position:relative; display:inline-flex; align-items:center;
+    }
+    .tooltip-text{
+      position:absolute; right:0; top:100%;
+      transform:translateY(8px);
+      background:#111735; color:#ecf2ff;
+      border:1px solid #1d2a55; border-radius:8px;
+      padding:6px 10px; white-space:nowrap;
+      font:600 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      opacity:0; pointer-events:none;
+      box-shadow:0 8px 24px rgba(0,0,0,.35);
+      transition:opacity .18s ease, transform .18s ease;
+    }
+    .tooltip:hover .tooltip-text{ opacity:1; transform:translateY(4px); }
+    .tooltip-text::after{
+      content:""; position:absolute; top:-6px; right:10px;
+      border-width:6px; border-style:solid;
+      border-color:transparent transparent #111735 transparent;
+    }
+    @media (max-width:440px){
+      header p{display:none;} /* nasconde il testo su iPhone SE */
+      .tooltip-text{ font-size:11px; }
     }
   </style>
 </head>
+
 <body>
   <header>
-    <h1>🚗 Lift Runner — Prototipo</h1>
-    <p id="intro">
+    <div class="header-flex">
+      <img src="./icons/pezzaliAPP-logo.png" alt="pezzaliAPP" class="logo-left">
+      <h1>Lift Runner</h1>
+
+      <span class="tooltip">
+        <a href="https://www.alessandropezzali.it/KubeApp/" target="_blank" rel="noopener" aria-label="Gioca a Il Cubo">
+          <img src="./icons/kubeapp-icon.png" alt="KubeApp" class="logo-right">
+        </a>
+        <span class="tooltip-text" role="tooltip">Gioca a Il Cubo 🎲</span>
+      </span>
+    </div>
+
+    <p>
       Evita gli ostacoli, allinea l’auto su un <strong>sollevatore</strong> e premi <kbd>L</kbd> (o tocca “LIFT”) per salire al piano superiore.<br>
       Comandi: <kbd>←</kbd><kbd>→</kbd> sposta, <kbd>↑</kbd>/<kbd>↓</kbd> cambia corsia, <kbd>Spazio</kbd> turbo.
     </p>
@@ -62,23 +111,64 @@
   <footer>PWA: offline-ready. Installa dalla barra del browser (Aggiungi alla Home).</footer>
 
   <script>
-    // --- PWA SW registration & auto-update
+    // Tooltip mobile: mostra per 2s al tap
+    (function(){
+      var tipWrap = document.querySelector('.tooltip');
+      if(!tipWrap) return;
+      var tip = tipWrap.querySelector('.tooltip-text');
+      var link = tipWrap.querySelector('a');
+      var hideTimer = null;
+
+      function showTipOnce(e){
+        if (window.matchMedia('(hover: none)').matches){
+          if (!tipWrap.classList.contains('tip-open')) {
+            e.preventDefault();
+            tipWrap.classList.add('tip-open');
+            tip.style.opacity = '1';
+            tip.style.transform = 'translateY(4px)';
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(() => {
+              tipWrap.classList.remove('tip-open');
+              tip.style.opacity = '';
+              tip.style.transform = '';
+            }, 2000);
+          }
+        }
+      }
+      link.addEventListener('click', showTipOnce, {passive:false});
+      document.addEventListener('click', ev=>{
+        if (!tipWrap.contains(ev.target)){
+          tipWrap.classList.remove('tip-open');
+          tip.style.opacity = '';
+          tip.style.transform = '';
+        }
+      });
+    })();
+
+    // PWA: registra il Service Worker e forza l’update se disponibile
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').then(reg => {
-          if (reg.waiting) { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); location.reload(); }
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            window.location.reload();
+          }
           reg.addEventListener('updatefound', () => {
-            const nw = reg.installing;
-            if (nw) nw.addEventListener('statechange', () => {
-              if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-                nw.postMessage({ type: 'SKIP_WAITING' }); location.reload();
-              }
-            });
+            const newSW = reg.installing;
+            if (newSW) {
+              newSW.addEventListener('statechange', () => {
+                if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+                  newSW.postMessage({ type: 'SKIP_WAITING' });
+                  window.location.reload();
+                }
+              });
+            }
           });
         }).catch(err => console.warn('SW registration failed:', err));
       });
     }
   </script>
+
   <script src="./app.js"></script>
 </body>
 </html>
