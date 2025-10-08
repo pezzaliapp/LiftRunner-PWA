@@ -1,9 +1,9 @@
-/* Lift Runner — v3.3
- * Additions:
- * - Combo: 3 bonus entro 8s → x2 al 3° e ai successivi finché non scade la finestra
- * - Turbo bar: energia si consuma/ricarica, Turbo bloccato a 0
- * - NPC su lift (donna con bambino) random: se sali su un lift occupato → GAME OVER
- * - Mantiene: bonus, livelli, tumbleweed, UFO, D-pad mobile, auto-lift, suoni, score/best
+/* Lift Runner — v3.5
+ * New:
+ * - Shield (pickup raro ~1/min): dura 15s o assorbe 1 collisione (aura + HUD + suoni)
+ * - Ghost Lift (≈20% dei lift): teletrasporta avanti ~400px e scambia piano (low↔high) +200 pt
+ * Keep:
+ * - Bonus/Combo, Turbo bar, Stages, Tumbleweed, UFO, NPC "family" lift (game over), D-pad mobile
  */
 
 (() => {
@@ -37,15 +37,19 @@
     speed: 3.6, turbo: 6.4,
     level: 'low', lane: 1,
     alive: true, lifting: false,
-    turboOn: false
+    turboOn: false,
+    shieldTime: 0,      // seconds remaining
+    _turboWasOn: false
   };
 
   // Entities
   const obstacles = []; // {type:'block'|'bush', x,y,w,h,level,lane,speed,theta?,scored?}
-  const lifts     = []; // {x,y,w,h,dir:'up'|'down',active,alignedLane,npc?:'family',blink?:number}
+  const lifts     = []; // {x,y,w,h,dir:'up'|'down',active,alignedLane,npc?:'family',ghost?:true,blink?:number}
   const bonuses   = []; // {x,y,w,h,level,lane,points,active,ttl}
   const ufos      = []; // {x,y,w,h,speed,t}
-  const floats    = []; // floating texts: {x,y,text,ttl}
+  const shields   = []; // {x,y,w,h,level,lane,active,ttl}
+  const floats    = []; // {x,y,text,ttl}
+  const particles = []; // teleport scia: {x,y,vx,vy,ttl}
 
   // ===== Audio =====
   let actx=null, muted=false;
@@ -90,11 +94,14 @@
     v.gain.value=0.06; v.gain.exponentialRampToValueAtTime(0.0001,t+1.2);
     o.connect(v).connect(actx.destination); o.start(t); o.stop(t+1.2);
   };
+  const shieldPickupSound = ()=>{ blip(980,0.08,0.09,'triangle'); setTimeout(()=>blip(640,0.06,0.07,'triangle'),70); };
+  const shieldBreakSound  = ()=>{ blip(240,0.08,0.12,'square'); setTimeout(()=>blip(180,0.10,0.10,'square'),60); };
+  const whoosh = ()=>{ sweep(300,1200,0.18,0.10); };
   ['pointerdown','keydown','touchstart','click'].forEach(t=>{
     window.addEventListener(t, ()=>{ ensureAudio(); actx && actx.resume && actx.resume(); }, {once:true, passive:true});
   });
 
-  // ===== Palette & Stages =====
+  // ===== Stages =====
   const STAGES = {
     1: { name:'LEVEL 1 — NOTTE',   sky:'#0b1022', star:'#1d2a55', road:'#0f1834', dash:'#223069' },
     2: { name:'LEVEL 2 — ALBA',    sky:'#1b1230', star:'#fdc1c1', road:'#2a1a3f', dash:'#ca6bee' },
@@ -102,12 +109,7 @@
   };
   let stage = 1;
   let stageMsg = { text:'', t:0 };
-
-  function setStage(n){
-    stage = n;
-    stageMsg = { text: STAGES[stage].name, t: 1.8 };
-    levelUpSound();
-  }
+  function setStage(n){ stage = n; stageMsg = { text: STAGES[stage].name, t: 1.8 }; levelUpSound(); }
 
   // ===== Spawn =====
   function spawnObstacle(){
@@ -121,12 +123,10 @@
     const obj = {
       type, level, lane,
       x: Math.max(W+40, lastX+minGapX),
-      y: baseY,
-      w: (type==='block'? 40:32), h: (type==='block'? 20:32),
+      y: baseY, w: (type==='block'? 40:32), h: (type==='block'? 20:32),
       speed: BASE_SCROLL + Math.random()*1.2 + (stage-1)*0.3,
-      scored:false
+      scored:false, theta: (type==='bush'? Math.random()*Math.PI*2 : 0)
     };
-    if (type==='bush') obj.theta = Math.random()*Math.PI*2;
     obstacles.push(obj);
   }
 
@@ -139,10 +139,11 @@
       y: yBase - lane*laneGap - 6,
       w: 140, h: 16, dir, active: true, alignedLane: lane
     };
-    // 12% di probabilità che sia occupato da "donna con bambino"
-    if (Math.random() < 0.12) {
-      L.npc = 'family';
-      L.blink = 0; // per lampeggio visivo
+    // Ghost ≈ 1 su 5, altrimenti 12% NPC family
+    if (Math.random() < 0.20) {
+      L.ghost = true;
+    } else if (Math.random() < 0.12) {
+      L.npc = 'family'; L.blink = 0;
     }
     lifts.push(L);
   }
@@ -155,30 +156,40 @@
     bonuses.push({ x, y, w: 18, h: 18, level: lvl, lane, points, active:true, ttl: 8 });
   }
 
+  function spawnShield(){
+    const lvl = Math.random()<0.5 ? 'low' : 'high';
+    const lane = Math.floor(Math.random()*LANES);
+    const x = W + 220 + Math.random()*380;
+    const y = (lvl==='low'? levelY.low : levelY.high) - lane*laneGap - 14;
+    shields.push({ x, y, w: 20, h: 20, level:lvl, lane, active:true, ttl: 14 });
+  }
+
   function spawnUFO(){
     const y = levelY.high - laneGap*2 - 70 + Math.random()*30;
     ufos.push({ x: W + 40, y, w: 60, h: 24, speed: 2.2 + Math.random()*1.0, t:0 });
     ufoSound();
   }
 
+  // Preload
   for(let i=0;i<3;i++) spawnObstacle();
   spawnLift('up'); spawnLift('down');
 
-  // ===== Stato =====
+  // ===== State =====
   let running=false, paused=false;
-  let last=performance.now(), elapsed=0, score=0;
-  let best = +localStorage.getItem('liftRunnerBest') || 0;
+  let last=performance.now(), elapsed=0, score=0, best=+localStorage.getItem('liftRunnerBest')||0;
 
   // Combo
-  let comboCount = 0;         // bonus consecutivi
-  let comboTimer = 0;         // tempo rimanente per mantenere la combo
-  const COMBO_WINDOW = 8.0;   // secondi
-  let comboFlash = 0;         // per HUD anim
+  let comboCount = 0, comboTimer = 0, comboFlash = 0;
+  const COMBO_WINDOW = 8.0;
 
   // Turbo energy
-  let turboEnergy = 100;      // 0..100
-  const TURBO_USE = 28;       // consumo %/s
-  const TURBO_REGEN = 18;     // ricarica %/s
+  let turboEnergy = 100; const TURBO_USE=28, TURBO_REGEN=18;
+
+  // Shield spawn timer (~1/min)
+  let shieldSpawnTimer = 0;
+
+  // Teleport flash
+  let flashTime = 0;
 
   // ===== Keyboard =====
   const keys=Object.create(null);
@@ -267,23 +278,20 @@
   // ===== Start / Pause =====
   function startGame(){
     running=true; paused=false; last=performance.now(); elapsed=0; score=0;
-    obstacles.length=0; lifts.length=0; bonuses.length=0; ufos.length=0; floats.length=0;
+    obstacles.length=0; lifts.length=0; bonuses.length=0; ufos.length=0; floats.length=0; shields.length=0; particles.length=0;
     for(let i=0;i<3;i++) spawnObstacle();
     spawnLift('up'); spawnLift('down');
-    Object.assign(player,{ x:120, level:'low', lane:1, alive:true, lifting:false, turboOn:false });
+    Object.assign(player,{ x:120, level:'low', lane:1, alive:true, lifting:false, turboOn:false, shieldTime:0, _turboWasOn:false });
     setStage(1);
-    comboCount=0; comboTimer=0; comboFlash=0;
-    turboEnergy=100;
+    comboCount=0; comboTimer=0; comboFlash=0; turboEnergy=100; shieldSpawnTimer=0; flashTime=0;
     blip(520,0.08,0.08); blip(780,0.08,0.07);
   }
   function toStart(){ running=false; paused=false; }
   function togglePause(){ if(!running) return; paused=!paused; if(!paused) last=performance.now(); if(pauseBtn) pauseBtn.textContent=paused?'Resume':'Pausa'; }
 
   // ===== Lift =====
-  let liftAnim=null;
-  let eligibleSince=0;
-  const AUTO_LIFT_DELAY=150;
-  const LIFT_TOL=18;
+  let liftAnim=null, eligibleSince=0;
+  const AUTO_LIFT_DELAY=150, LIFT_TOL=18;
 
   function eligibleLift(){
     if(!player.alive || player.lifting) return null;
@@ -297,15 +305,38 @@
     return null;
   }
   function manualLift(){ const L=eligibleLift(); if(L) startLift(L); }
+
+  function teleportViaGhost(L){
+    // flash + particles
+    whoosh(); flashTime = 0.25;
+    for(let i=0;i<16;i++){
+      particles.push({
+        x: player.x + player.w/2, y: player.y + player.h/2,
+        vx: (Math.random()*80+80), vy: (Math.random()*40-20),
+        ttl: 0.25 + Math.random()*0.2
+      });
+    }
+    // swap level e sposta avanti
+    player.level = (player.level==='low') ? 'high' : 'low';
+    player.x = Math.min(player.x + 400, W*0.62);
+    // riallinea y al nuovo piano
+    const base = (player.level==='low')?levelY.low:levelY.high;
+    player.y = base - player.lane*laneGap - (player.h/2);
+    score += 200; floats.push({ x: player.x, y: player.y-12, text:'+200 GHOST', ttl:1.2 });
+  }
+
   function startLift(L){
-    // Se occupato da "donna con bambino" → game over immediato
+    // NPC family = game over immediato
     if (L.npc === 'family') {
-      // piccolo lampeggio visivo e suono di crash
-      L.blink = 0.6;
-      player.alive = false; running = false; crash();
+      L.blink = 0.6; player.alive = false; running = false; crash();
       floats.push({ x: L.x+L.w/2, y: L.y-10, text:'LIFT OCCUPATO!', ttl:1.4 });
       return;
     }
+    // Ghost lift = teletrasporto istantaneo
+    if (L.ghost) {
+      L.active=false; teleportViaGhost(L); return;
+    }
+    // Normale anim
     player.lifting=true;
     const delta=(levelY.low - levelY.high)*(L.dir==='up'?1:-1);
     liftAnim={ t:0, fromY:player.y, toY:player.y - delta };
@@ -325,7 +356,7 @@
 
   // ===== Update =====
   function update(dt){
-    // Turbo energy management
+    // Turbo energy
     const wantTurbo = player.turboOn || !!keys['Space'] || (isMobile && holdTurbo);
     if (wantTurbo && turboEnergy > 1) {
       turboEnergy = Math.max(0, turboEnergy - TURBO_USE * dt);
@@ -334,6 +365,9 @@
       turboEnergy = Math.min(100, turboEnergy + TURBO_REGEN * dt);
       if (player._turboWasOn) { blip(260,0.05,0.05,'triangle'); player._turboWasOn=false; }
     }
+    if (player.shieldTime > 0) player.shieldTime = Math.max(0, player.shieldTime - dt);
+    if (flashTime > 0) flashTime -= dt;
+
     const turboActive = wantTurbo && turboEnergy > 1;
     const targetSpeed = turboActive ? player.turbo : player.speed;
 
@@ -344,11 +378,11 @@
     player.x += player.vx * 180 * dt;
     player.x = Math.max(40, Math.min(W*0.62, player.x));
 
-    // Lane change (keyboard)
+    // Lane change keyboard
     if((keys['ArrowUp']||keys['KeyW']) && !player.lifting){ laneUp(); keys['ArrowUp']=keys['KeyW']=false; blip(760,0.05,0.06); }
     if((keys['ArrowDown']||keys['KeyS']) && !player.lifting){ laneDown(); keys['ArrowDown']=keys['KeyS']=false; blip(540,0.05,0.06); }
 
-    // Y / lift
+    // Y / lift anim
     if(!player.lifting){
       const base=(player.level==='low')?levelY.low:levelY.high;
       const targetY= base - player.lane*laneGap - (player.h/2);
@@ -361,7 +395,7 @@
       if(liftAnim.t>=1){ player.lifting=false; player.level=(player.level==='low')?'high':'low'; liftAnim=null; }
     }
 
-    // Auto-lift window
+    // Auto-lift
     const L=eligibleLift();
     if(L){ if(!eligibleSince) eligibleSince=performance.now(); else if(performance.now()-eligibleSince>=AUTO_LIFT_DELAY) startLift(L); }
     else { eligibleSince=0; }
@@ -379,6 +413,10 @@
       else if (bonusRoll < 0.013) spawnBonus(500);
       else if (bonusRoll < 0.014) spawnBonus(1000);
     }
+    // Shield spawn ~ 1/min
+    shieldSpawnTimer += dt;
+    if (shieldSpawnTimer > 50 && Math.random() < 0.003) { spawnShield(); shieldSpawnTimer = 0; }
+
     // UFO spawn
     if (Math.random() < (stage>=2 ? 0.0025 : 0.0012) && ufos.length < 1) spawnUFO();
 
@@ -386,43 +424,38 @@
     for(const o of obstacles){
       const boost = (player.level===o.level ? targetSpeed*0.45 : targetSpeed*0.25);
       o.x -= (o.speed + boost) * dt * 60;
-      if (o.type==='bush') {
-        o.theta += dt * 6.5;
-        o.y += Math.sin(o.theta*2) * 0.2;
-      }
+      if (o.type==='bush') { o.theta += dt * 6.5; o.y += Math.sin(o.theta*2) * 0.2; }
       if(!o.scored && o.x + o.w < player.x){ o.scored=true; score+=5; blip(900,0.05,0.05,'triangle'); }
     }
 
-    // Update lifts (blink se NPC)
+    // Update lifts
     for(const L2 of lifts){
       L2.x -= (BASE_SCROLL + 1.1 + (turboActive?0.4:0)) * dt * 60;
-      if (L2.npc === 'family' && L2.blink != null) {
-        L2.blink = Math.max(0, L2.blink - dt);
-      }
+      if (L2.npc === 'family' && L2.blink != null) L2.blink = Math.max(0, L2.blink - dt);
     }
 
     // Update bonuses + COMBO
-    // Decadimento combo
-    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) { comboCount = 0; } }
-
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) comboCount = 0; }
     for (const b of bonuses){
-      b.x -= (BASE_SCROLL + 1.2) * dt * 60;
-      b.ttl -= dt;
-
+      b.x -= (BASE_SCROLL + 1.2) * dt * 60; b.ttl -= dt;
       if (b.level === player.level && b.active && overlapRelaxed(player,b,-4)){
         b.active = false;
-
-        // combo logic: il 3° e successivi entro la finestra → x2
-        let points = b.points;
-        let isX2 = false;
+        let points = b.points, isX2=false;
         comboCount += 1;
-        if (comboCount >= 3) { points *= 2; isX2 = true; comboFlash = 0.8; }
-
-        comboTimer = COMBO_WINDOW; // reset finestra
+        if (comboCount >= 3) { points *= 2; isX2=true; comboFlash=0.8; }
+        comboTimer = COMBO_WINDOW;
         score += points;
-
         bonusChime(b.points, isX2);
         floats.push({ x: b.x, y: b.y, text: `+${points}${isX2?' COMBO':''}`, ttl: 1.2 });
+      }
+    }
+
+    // Update shields pickups
+    for (const s of shields){
+      s.x -= (BASE_SCROLL + 1.0) * dt * 60; s.ttl -= dt;
+      if (s.level === player.level && s.active && overlapRelaxed(player,s,-4)){
+        s.active=false; player.shieldTime = 15.0; shieldPickupSound();
+        floats.push({ x:s.x, y:s.y, text:'SHIELD ON', ttl:1.2 });
       }
     }
 
@@ -436,20 +469,38 @@
       }
     }
 
-    // Update floating texts
-    for (const f of floats){ f.y -= 12 * dt; f.ttl -= dt; }
+    // Update particles (ghost whoosh)
+    for (const p of particles){
+      p.x += p.vx * dt; p.y += p.vy * dt; p.ttl -= dt; p.vy *= 0.92; p.vx *= 0.94;
+    }
 
     // Cleanup
     for(let i=obstacles.length-1;i>=0;i--) if(obstacles[i].x + obstacles[i].w < -60) obstacles.splice(i,1);
     for(let i=lifts.length-1;i>=0;i--)     if(lifts[i].x + lifts[i].w < -70)       lifts.splice(i,1);
     for(let i=bonuses.length-1;i>=0;i--)   if(bonuses[i].x + bonuses[i].w < -60 || bonuses[i].ttl<=0 || !bonuses[i].active) bonuses.splice(i,1);
     for(let i=ufos.length-1;i>=0;i--)      if(ufos[i].x + ufos[i].w < -80) ufos.splice(i,1);
-    for(let i=floats.length-1;i>=0;i--)    if(floats[i].ttl<=0) floats.splice(i,1);
+    for(let i=shields.length-1;i>=0;i--)   if(shields[i].x + shields[i].w < -60 || shields[i].ttl<=0 || !shields[i].active) shields.splice(i,1);
+    for(let i=particles.length-1;i>=0;i--) if(particles[i].ttl<=0) particles.splice(i,1);
 
     // Collisioni con ostacoli
-    for(const o of obstacles){
-      if(o.level!==player.level) continue;
-      if(overlapRelaxed(player,o,-3)){ player.alive=false; running=false; crash(); break; }
+    if (player.alive){
+      for(const o of obstacles){
+        if(o.level!==player.level) continue;
+        if(overlapRelaxed(player,o,-3)){
+          if (player.shieldTime > 0){
+            // assorbe urto
+            player.shieldTime = 0; shieldBreakSound();
+            floats.push({ x: player.x, y: player.y-12, text:'SHIELD!', ttl:1.0 });
+            // spinta leggera indietro
+            player.x = Math.max(40, player.x - 20);
+            // rimuovi l’ostacolo colpito per evitare loop
+            o.x = -9999;
+          } else {
+            player.alive=false; running=false; crash();
+          }
+          break;
+        }
+      }
     }
 
     // Score & time + Best
@@ -467,29 +518,37 @@
 
   // ===== Draw =====
   function draw(){
-    // BG per stage
-    ctx.fillStyle = STAGES[stage].sky;
-    ctx.fillRect(0,0,W,H);
-    drawStars(STAGES[stage].star);
+    // Flash (teleport)
+    if (flashTime > 0){
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = Math.min(0.35, flashTime*1.4);
+      ctx.fillRect(0,0,W,H);
+      ctx.globalAlpha = 1;
+    }
 
+    // BG per stage
+    ctx.fillStyle = STAGES[stage].sky; ctx.fillRect(0,0,W,H);
+    drawStars(STAGES[stage].star);
     drawRoad(levelY.high, STAGES[stage].road, STAGES[stage].dash);
     drawRoad(levelY.low,  STAGES[stage].road, STAGES[stage].dash);
 
     for(const l of lifts) drawLift(l);
     for(const o of obstacles) drawObstacle(o);
     for(const b of bonuses)   drawBonus(b);
+    for(const s of shields)   drawShieldPickup(s);
     for(const u of ufos)      drawUFO(u);
+    for(const p of particles) drawParticle(p);
     for(const f of floats)    drawFloat(f);
 
     drawCar(player);
 
-    // HUD in-canvas: time/score/best
+    // HUD in-canvas
     ctx.save();
-    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,210,60);
+    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,230,74);
     ctx.fillStyle='#ecf2ff'; ctx.font='bold 14px system-ui,Segoe UI,Arial';
     ctx.fillText(`⏱ ${elapsed.toFixed(1)}s`, 16, 28);
     ctx.fillText(`🏁 ${score}`, 16, 46);
-    ctx.textAlign='right'; ctx.fillText(`Best: ${best}`, 216, 28);
+    ctx.textAlign='right'; ctx.fillText(`Best: ${best}`, 236, 28);
 
     // Turbo bar
     ctx.textAlign='left';
@@ -498,13 +557,18 @@
     ctx.strokeRect(64, 50, 120, 10);
     ctx.fillStyle='#22c55e';
     ctx.fillRect(64, 50, 120 * (turboEnergy/100), 10);
+
+    // Shield timer
+    if (player.shieldTime > 0){
+      ctx.fillStyle='#a5f3fc';
+      ctx.fillText(`Shield ${player.shieldTime.toFixed(0)}s`, 16, 78);
+    }
     ctx.restore();
 
-    // Combo HUD (se attivo)
+    // Combo HUD
     if (comboCount >= 2 || comboTimer > 0){
       const a = comboFlash>0 ? Math.min(1, comboFlash/0.8) : Math.max(0.3, comboTimer/COMBO_WINDOW);
-      ctx.save();
-      ctx.globalAlpha = a;
+      ctx.save(); ctx.globalAlpha = a;
       ctx.fillStyle='#ffd166';
       ctx.font='bold 18px system-ui,Segoe UI,Arial';
       ctx.textAlign='center';
@@ -516,21 +580,17 @@
     // Stage overlay
     if (stageMsg.t>0){
       const a = Math.min(1, stageMsg.t / 0.8);
-      ctx.save();
-      ctx.globalAlpha = a;
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(0,0,W,H);
-      ctx.fillStyle = '#ecf2ff';
-      ctx.font = 'bold 28px system-ui,Segoe UI,Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(stageMsg.text, W/2, 64);
+      ctx.save(); ctx.globalAlpha = a;
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#ecf2ff'; ctx.font = 'bold 28px system-ui,Segoe UI,Arial';
+      ctx.textAlign = 'center'; ctx.fillText(stageMsg.text, W/2, 64);
       ctx.restore();
     }
 
-    // Overlays generali
+    // Overlays
     const tip = isMobile
-      ? 'D-pad sotto • A=LIFT • B=TURBO • Bonus verdi/blu/viola'
-      : 'Tastiera: ← → • ↑/↓ corsia • L=LIFT • Spazio=TURBO';
+      ? 'D-pad sotto • A=LIFT • B=TURBO • Shield raro • Ghost lift 👻'
+      : 'Tastiera: ← → • ↑/↓ corsia • L=LIFT • Spazio=TURBO • Shield • Ghost';
     if(!running || paused || !player.alive){
       ctx.fillStyle='rgba(8,12,28,0.72)'; ctx.fillRect(0,0,W,H);
       ctx.fillStyle='#ecf2ff'; ctx.textAlign='center';
@@ -549,14 +609,15 @@
   }
 
   function drawFloat(f){
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, f.ttl/1.2);
-    ctx.fillStyle='#ecf2ff';
-    ctx.font='bold 14px system-ui,Segoe UI,Arial';
-    ctx.fillText(f.text, f.x, f.y);
-    ctx.restore();
+    ctx.save(); ctx.globalAlpha = Math.max(0, f.ttl/1.2);
+    ctx.fillStyle='#ecf2ff'; ctx.font='bold 14px system-ui,Segoe UI,Arial';
+    ctx.fillText(f.text, f.x, f.y); ctx.restore();
   }
-
+  function drawParticle(p){
+    ctx.save(); ctx.globalAlpha = Math.max(0, p.ttl/0.45);
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.fillRect(p.x, p.y, 2, 2); ctx.restore();
+  }
   function drawRoad(yBase, road='#0f1834', dash='#223069'){
     ctx.fillStyle=road; ctx.fillRect(0,yBase,W,roadH);
     ctx.strokeStyle=dash; ctx.lineWidth=2;
@@ -567,11 +628,15 @@
   }
   function drawLift(L){
     const occupied = L.npc === 'family';
-    // base/platform color
+    const isGhost  = !!L.ghost;
     if (occupied){
-      // lampeggia rosso se blink attivo, altrimenti rosso scuro
       const blinkOn = L.blink && Math.floor(performance.now()/120)%2===0;
       ctx.fillStyle = blinkOn ? '#ff5a5a' : '#7a2b2b';
+    } else if (isGhost){
+      // ghost violet glow
+      ctx.fillStyle = '#6d28d9';
+      ctx.fillRect(L.x-2,L.y-2,L.w+4,L.h+4); // glow border
+      ctx.fillStyle = '#8b5cf6';
     } else {
       ctx.fillStyle=L.active?'#2dd36f':'#2a7a54';
     }
@@ -580,9 +645,8 @@
     ctx.fillStyle='#1b254d';
     ctx.fillRect(L.x+6, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
     ctx.fillRect(L.x+L.w-14, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
-
     // direzione
-    ctx.fillStyle='#eaffef';
+    ctx.fillStyle=isGhost ? '#efe9ff' : '#eaffef';
     const cx=L.x+L.w/2, cy=L.y+L.h/2;
     ctx.beginPath();
     const dirUp = L.dir==='up';
@@ -590,20 +654,17 @@
     else { ctx.moveTo(cx,cy+6); ctx.lineTo(cx-6,cy-4); ctx.lineTo(cx+6,cy-4); }
     ctx.closePath(); ctx.fill();
 
-    // NPC: “donna con bambino”
+    // NPC family
     if (occupied){
       const px = L.x + L.w*0.75, py = L.y - 2;
-      ctx.save();
-      ctx.strokeStyle='#ffe6e6'; ctx.lineWidth=2;
-      // figura adulta
-      ctx.beginPath(); ctx.arc(px, py-10, 5, 0, Math.PI*2); ctx.stroke(); // testa
-      ctx.beginPath(); ctx.moveTo(px, py-5); ctx.lineTo(px, py+10); ctx.stroke(); // corpo
-      ctx.beginPath(); ctx.moveTo(px, py+10); ctx.lineTo(px-5, py+18); ctx.moveTo(px, py+10); ctx.lineTo(px+5, py+18); ctx.stroke(); // gambe
-      // bambino accanto
-      const cx = px-12, cy = py-2;
-      ctx.beginPath(); ctx.arc(cx, cy-6, 3.2, 0, Math.PI*2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx, cy-2); ctx.lineTo(cx, cy+8); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx, cy+8); ctx.lineTo(cx-3, cy+14); ctx.moveTo(cx, cy+8); ctx.lineTo(cx+3, cy+14); ctx.stroke();
+      ctx.save(); ctx.strokeStyle='#ffe6e6'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(px, py-10, 5, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px, py-5); ctx.lineTo(px, py+10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px, py+10); ctx.lineTo(px-5, py+18); ctx.moveTo(px, py+10); ctx.lineTo(px+5, py+18); ctx.stroke();
+      const cx2 = px-12, cy2 = py-2;
+      ctx.beginPath(); ctx.arc(cx2, cy2-6, 3.2, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx2, cy2-2); ctx.lineTo(cx2, cy2+8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx2, cy2+8); ctx.lineTo(cx2-3, cy2+14); ctx.moveTo(cx2, cy2+8); ctx.lineTo(cx2+3, cy2+14); ctx.stroke();
       ctx.restore();
     }
   }
@@ -627,6 +688,15 @@
     ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2 + 2, 0, Math.PI*2); ctx.stroke();
   }
+  function drawShieldPickup(s){
+    if (!s.active) return;
+    ctx.save();
+    // bagliore azzurro
+    ctx.shadowColor = '#93c5fd'; ctx.shadowBlur = 8;
+    ctx.fillStyle='#60a5fa';
+    ctx.beginPath(); ctx.arc(s.x + s.w/2, s.y + s.h/2, s.w/2, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
   function drawUFO(u){
     ctx.save(); ctx.translate(u.x, u.y);
     ctx.fillStyle='#8ab4ff'; ctx.beginPath();
@@ -638,6 +708,15 @@
     ctx.restore();
   }
   function drawCar(p){
+    // aura shield
+    if (p.shieldTime > 0){
+      const a = 0.35 + 0.15*Math.sin(performance.now()/120);
+      ctx.save(); ctx.globalAlpha = a; ctx.fillStyle='#93c5fd';
+      ctx.beginPath(); ctx.roundRect
+        ? ctx.roundRect(p.x-6, p.y-6, p.w+12, p.h+12, 10)
+        : (ctx.fillRect(p.x-6, p.y-6, p.w+12, p.h+12));
+      ctx.fill(); ctx.restore();
+    }
     ctx.fillStyle=p.alive?'#22c55e':'#7a2b2b'; ctx.fillRect(p.x,p.y,p.w,p.h);
     ctx.fillStyle='#cfeee0'; ctx.fillRect(p.x+10,p.y+4,p.w-20,p.h-10);
     ctx.fillStyle='#ffe066'; ctx.fillRect(p.x+p.w-6,p.y+6,4,6);
