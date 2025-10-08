@@ -42,7 +42,21 @@
       transition:transform .15s ease;
     }
     .logo-left:hover, .logo-right:hover{ transform:scale(1.08); }
-    header h1{margin:0; font-size:18px; text-align:center; flex:1}
+
+    header h1{
+      margin:0; font-size:18px; text-align:center; flex:1; display:flex; align-items:center; justify-content:center; gap:10px;
+    }
+
+    /* Pulsante LEGGIMI */
+    .btn-readme{
+      font-size:13px; font-weight:600; color:#ecf2ff;
+      background:#1d2a55; border:1px solid #2a3a7a;
+      padding:4px 10px; border-radius:8px;
+      text-decoration:none; transition:background .2s ease, transform .1s ease;
+    }
+    .btn-readme:hover{ background:#2b3f8a; transform:translateY(-1px); }
+    .btn-readme:active{ transform:translateY(1px); }
+
     header p{margin:6px 0 0; color:var(--muted)}
 
     /* Tooltip */
@@ -97,13 +111,14 @@
     @media (max-width:900px){
       header p{ display:none !important; }
     }
+
     /* iOS: niente selezione/callout evidenziamento su tutta l'area di gioco */
-#gamewrap, #padBar, .padBtn, body {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
-}
+    #gamewrap, #padBar, .padBtn, body {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
   </style>
 </head>
 
@@ -115,8 +130,11 @@
         <img src="./icons/pezzaliAPP-logo.png" alt="pezzaliAPP" class="logo-left">
       </a>
 
-      <!-- Titolo centrale -->
-      <h1>Lift Runner</h1>
+      <!-- Titolo centrale + LEGGIMI -->
+      <h1>
+        Lift Runner
+        <a href="https://www.alessandropezzali.it/LiftRunner-PWA/readme.html" target="_blank" rel="noopener" class="btn-readme">LEGGIMI</a>
+      </h1>
 
       <!-- Tooltip + logo destro KubeApp -->
       <span class="tooltip">
