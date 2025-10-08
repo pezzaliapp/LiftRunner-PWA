@@ -1,10 +1,12 @@
 {
+  "id": "/",
   "name": "Lift Runner — PezzaliAPP Edition",
   "short_name": "LiftRunner",
   "description": "Schiva ostacoli, usa i sollevatori (UP/DOWN), attiva il turbo e colleziona bonus. Una PWA arcade firmata PezzaliAPP.",
   "start_url": "./?src=pwa",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
   "orientation": "landscape",
   "background_color": "#0b1022",
   "theme_color": "#0f172a",
@@ -70,5 +72,18 @@
   "categories": ["games", "arcade", "entertainment"],
   "lang": "it-IT",
   "dir": "ltr",
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  }
+
+  /* Esempio facoltativo:
+  ,"protocol_handlers": [
+    {
+      "protocol": "web+liftrunner",
+      "url": "./?open=%s"
+    }
+  ]
+  */
 }
