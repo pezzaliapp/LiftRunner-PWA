@@ -1,7 +1,7 @@
-// sw.js — Lift Runner v2.1 (2025-10-08)
-// Cache-first + auto-reload su update + icone aggiunte
+// sw.js — Lift Runner v3.9 (2025-10-08)
+// Cache-first + auto-reload + icone e risorse aggiornate
 
-const CACHE = 'lift-runner-v2.1';
+const CACHE = 'lift-runner-v3.9';
 const ASSETS = [
   './',
   './index.html',
