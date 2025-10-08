@@ -1,7 +1,8 @@
-/* Lift Runner — v3.9 (Jump + Pneumatic Edition)
+/* Lift Runner — v3.9.1 (Jump + Pneumatic + Lift-only HUD)
  * Novità:
- * - Jump corretto (verso l'alto) con fisica/gravity; A/X/HUD = Lift se pronto, altrimenti Jump
- * - Pneumatici che rotolano su entrambi i livelli + drop casuale dai sollevatori (alto→basso)
+ * - Pulsante HUD LIFT ora fa SOLO lift (beep se non disponibile)
+ * - Jump corretto (verso l'alto) con fisica/gravity; X / A = Lift se pronto, altrimenti Jump
+ * - Pneumatici che rotolano su entrambi i livelli + drop dai sollevatori (alto→basso)
  * - Mantiene: Shield, Ghost Lift, NPC family, Turbo bar, Combo, UFO, D-pad mobile, PWA friendly
  */
 
@@ -234,12 +235,14 @@
     if(c==='Space') { player.turboOn=false; }
   },{passive:false});
 
-  // HUD buttons
+  // ======== HUD buttons (MODIFICA: LIFT only) ========
   if(liftBtn){
     liftBtn.onclick = () => {
       ensureAudio(); actx && actx.resume && actx.resume();
       if (!running) startGame();
-      attemptLiftOrJump();
+      const L = eligibleLift();
+      if (L) manualLift();              // SOLO lift
+      else blip(180, 0.05, 0.06, 'square'); // beep se non disponibile
     };
   }
   if(pauseBtn) pauseBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); togglePause(); });
@@ -299,6 +302,7 @@
       btnLeft.addEventListener(t, ()=>{ holdLeft=false; }, {passive:true});
       btnRight.addEventListener(t,()=>{ holdRight=false;}, {passive:true});
     });
+    // A = Lift se pronto, altrimenti Jump (come X)
     btnA.addEventListener('pointerdown', e=>{ down(e); attemptLiftOrJump(); });
     btnB.addEventListener('pointerdown', e=>{ down(e); holdTurbo=true; });
     ['pointerup','pointercancel','pointerleave'].forEach(t=>{
@@ -408,10 +412,10 @@
     });
   }
 
-  // ===== Update =====
+   // ===== Update =====
   function update(dt){
     // HUD label lift/jump
-    if (liftBtn) liftBtn.textContent = eligibleLift() ? 'LIFT ✓' : 'JUMP';
+    if (liftBtn) liftBtn.textContent = eligibleLift() ? 'LIFT ✓' : 'LIFT';
 
     // Turbo energy
     const wantTurbo = player.turboOn || !!keys['Space'] || (isMobile && holdTurbo);
@@ -598,7 +602,8 @@
   // Helpers lane
   function laneUp(){ if(!player.lifting && player.lane<LANES-1) player.lane++; }
   function laneDown(){ if(!player.lifting && player.lane>0)     player.lane--; }
-    // ===== Draw =====
+
+  // ===== Draw =====
   function draw(){
     // Flash (teleport)
     if (flashTime > 0){
@@ -838,10 +843,8 @@
     requestAnimationFrame(loop);
   }
 
-  // Start helpers
+  // Start helpers & overlay start/restart
   requestAnimationFrame(ts=>{ last=ts; draw(); requestAnimationFrame(loop); });
-
-  // ===== Click/Touch overlay behavior =====
   canvas.addEventListener('pointerdown', e=>{
     if(!running){ e.preventDefault(); ensureAudio(); actx&&actx.resume&&actx.resume(); startGame(); }
     else if(!player.alive){ e.preventDefault(); toStart(); startGame(); }
