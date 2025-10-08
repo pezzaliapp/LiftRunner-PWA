@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lift Runner — PezzaliAPP Edition · README</title>
+  <meta name="theme-color" content="#0f172a" />
+  <style>
+    :root{
+      --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9;
+      --acc:#22c55e; --accent-2:#60a5fa; --border:#1d2a55;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; color:var(--ink);
+      font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      background:radial-gradient(1200px 600px at 60% -10%,#182347,transparent) no-repeat,var(--bg);
+    }
+
+    /* Header fisso con tasto PLAY */
+    .topbar{
+      position:sticky; top:0; z-index:5;
+      display:flex; align-items:center; gap:12px;
+      padding:12px 16px;
+      background:rgba(10,14,34,.85);
+      backdrop-filter:saturate(160%) blur(6px);
+      border-bottom:1px solid var(--border);
+    }
+    .logo{width:28px;height:28px;border-radius:6px}
+    .title{margin:0; font-weight:700; letter-spacing:.2px}
+    .grow{flex:1}
+    .btn-play{
+      appearance:none; -webkit-appearance:none;
+      background:linear-gradient(180deg,#25d06f,#1aad59);
+      color:#071a0f; font-weight:800; letter-spacing:.4px;
+      border:1px solid #1e8a4b; border-bottom-width:2px;
+      border-radius:10px; padding:10px 14px; cursor:pointer;
+      text-decoration:none; display:inline-flex; align-items:center; gap:8px;
+      box-shadow:0 6px 18px rgba(34,197,94,.18);
+    }
+    .btn-play:active{ transform:translateY(1px); }
+
+    /* Wrapper contenuti scroll */
+    .wrap{
+      max-width:940px; margin:12px auto 56px; padding:0 16px;
+    }
+    section{
+      background:var(--card); border:1px solid var(--border);
+      border-radius:14px; padding:18px 18px; margin:16px 0;
+    }
+    h1,h2,h3{margin:6px 0 10px}
+    h1{font-size:22px}
+    h2{font-size:18px}
+    h3{font-size:16px}
+    p{margin:10px 0; color:var(--ink)}
+    .muted{color:var(--muted)}
+    a{color:var(--accent-2); text-decoration:none}
+    a:hover{text-decoration:underline}
+    code,kbd,pre{
+      font-family:ui-monospace,SFMono-Regular,Consolas,Monaco,monospace;
+      background:#121a3a; color:#e6edff;
+      border:1px solid #223069; border-radius:8px;
+    }
+    kbd{padding:2px 6px}
+    pre{padding:12px; overflow:auto}
+    .tree{white-space:pre}
+    ul{padding-left:18px}
+    li{margin:4px 0}
+    blockquote{
+      margin:8px 0; padding:8px 12px;
+      border-left:4px solid #2a3a7a; background:#0f1736; color:#dfe6ff;
+      border-radius:8px;
+    }
+    .foot{
+      color:var(--muted); font-size:13px; text-align:center; padding:16px 0 40px;
+    }
+
+    /* Piccoli miglioramenti mobile */
+    @media (max-width:520px){
+      .btn-play{padding:9px 12px}
+      .title{font-size:16px}
+      .topbar{gap:10px}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Barra fissa con PLAY -->
+  <header class="topbar">
+    <img class="logo" src="./icons/pezzaliAPP-logo.png" alt="PezzaliAPP">
+    <h1 class="title">Lift Runner — PezzaliAPP Edition</h1>
+    <div class="grow"></div>
+    <a class="btn-play" href="./index.html" aria-label="Gioca a Lift Runner">
+      ▶︎ PLAY
+    </a>
+  </header>
+
+  <!-- Contenuti scrollabili -->
+  <main class="wrap">
+
+    <section>
+      <h2>🚗 Lift Runner — PezzaliAPP Edition</h2>
+      <p><strong>Un esperimento di logica, velocità e precisione.</strong><br/>
+         Sviluppato, scritto e diretto da <strong>Alessandro Pezzali</strong>.
+      </p>
+    </section>
+
+    <section>
+      <h2>🎮 Introduzione</h2>
+      <p><strong>Lift Runner</strong> nasce come esperimento tecnico e creativo: un gioco costruito interamente in
+        <strong>HTML5 + JavaScript puro</strong>, ottimizzato per funzionare <strong>offline come PWA</strong> su qualsiasi dispositivo — desktop, smartphone o tablet.</p>
+      <blockquote>
+        <p><strong>Idea base</strong><br>
+        Evita gli ostacoli, allinea l’auto su un sollevatore e sali di livello.<br>
+        Ogni piano è più veloce, più stretto, più imprevedibile.</p>
+      </blockquote>
+      <p>Nato all’interno del progetto <a href="https://pezzaliapp.com/#giochi" target="_blank" rel="noopener">pezzaliAPP.com</a>,
+         Lift Runner rappresenta un esercizio di equilibrio tra <strong>design minimale, logica dei percorsi e fisica di gioco</strong>,
+         con un codice interamente scritto a mano, senza framework né librerie esterne.</p>
+    </section>
+
+    <section>
+      <h2>🧠 Filosofia del progetto</h2>
+      <p>Lift Runner è molto più di un semplice arcade: è una metafora del <strong>tempo, del rischio e delle decisioni rapide</strong>.
+         Scegli quando salire o restare, quando rischiare un turbo o attendere un’apertura, quando fidarti di un “ghost lift”
+         o evitare un ostacolo che rotola all’improvviso.</p>
+      <blockquote>
+        <strong>“Come nelle vendite — e nella vita — ogni errore rallenta, ma ogni riflesso giusto ti fa avanzare.”</strong>
+      </blockquote>
+    </section>
+
+    <section>
+      <h2>⚙️ Caratteristiche tecniche</h2>
+      <ul>
+        <li><strong>Motore canvas 2D</strong> sviluppato da zero (no engine/framework).</li>
+        <li><strong>60 FPS</strong> ottimizzati per Safari, Chrome, Edge e Firefox.</li>
+        <li><strong>PWA completa</strong>: installabile da browser e giocabile offline.</li>
+        <li><strong>HUD touch</strong> stile arcade per iPhone/Android, con D-pad e pulsanti virtuali <kbd>A</kbd>/<kbd>B</kbd>.</li>
+        <li><strong>Best score</strong> salvato in <code>localStorage</code>.</li>
+        <li><strong>Suoni realtime</strong> via Web Audio API.</li>
+        <li><strong>Layout responsive</strong> desktop & mobile.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🚀 Funzionalità di gioco</h2>
+      <ul>
+        <li><strong>Jump</strong> con gravità e spinta verticale.</li>
+        <li><strong>Lift dinamici</strong> (up/down), NPC “Family” e <em>Ghost lift</em> (teletrasporto).</li>
+        <li><strong>Turbo</strong> con barra energia e rigenerazione.</li>
+        <li><strong>Combo</strong> e moltiplicatori punteggio.</li>
+        <li><strong>Shield</strong> temporaneo anti-urto.</li>
+        <li><strong>Pneumatici & cespugli rotolanti</strong> con fisica, anche in caduta dall’alto.</li>
+        <li><strong>UFO</strong> e bonus rari ad alto punteggio.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>🧩 Compatibilità</h2>
+      <table style="width:100%;border-collapse:collapse;border:1px solid var(--border)">
+        <thead>
+          <tr style="background:#0d1330">
+            <th style="text-align:left;padding:8px;border-bottom:1px solid var(--border)">Dispositivo</th>
+            <th style="text-align:left;padding:8px;border-bottom:1px solid var(--border)">Supporto</th>
+            <th style="text-align:left;padding:8px;border-bottom:1px solid var(--border)">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:8px;border-bottom:1px solid var(--border)">🖥️ Desktop</td><td style="padding:8px;border-bottom:1px solid var(--border)">✅</td><td style="padding:8px;border-bottom:1px solid var(--border)">Tastiera: ← → ↑ ↓ · L · X · Space</td></tr>
+          <tr><td style="padding:8px;border-bottom:1px solid var(--border)">📱 iPhone / iPad</td><td style="padding:8px;border-bottom:1px solid var(--border)">✅</td><td style="padding:8px;border-bottom:1px solid var(--border)">HUD touch, installabile PWA</td></tr>
+          <tr><td style="padding:8px;border-bottom:1px solid var(--border)">🤖 Android</td><td style="padding:8px;border-bottom:1px solid var(--border)">✅</td><td style="padding:8px;border-bottom:1px solid var(--border)">Funziona anche offline</td></tr>
+          <tr><td style="padding:8px">💻 Browser</td><td style="padding:8px">✅</td><td style="padding:8px">Chrome, Safari, Edge, Firefox, Brave</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>🧱 Struttura del progetto</h2>
+      <pre class="tree"><code>LiftRunner/
+├─ index.html                 # Interfaccia principale e HUD
+├─ app.js                     # Motore del gioco (canvas, logica, audio, input)
+├─ sw.js                      # Service Worker PWA (cache-first + auto-update)
+├─ manifest.webmanifest       # Metadati PWA / installazione
+├─ icons/
+│  ├─ icon-192.png
+│  ├─ icon-512.png
+│  ├─ icon-192-maskable.png
+│  ├─ icon-512-maskable.png
+│  ├─ kubeapp-icon.png
+│  └─ pezzaliAPP-logo.png
+└─ README.md                  # Questo file</code></pre>
+    </section>
+
+    <section>
+      <h2>🔗 Collegamenti integrati</h2>
+      <p>Lift Runner fa parte dell’universo <strong>PezzaliAPP</strong>: una costellazione di app, giochi e strumenti open-source creati per <strong>divulgare cultura digitale</strong>.</p>
+      <ul>
+        <li>🎲 <a href="https://www.alessandropezzali.it/KubeApp/" target="_blank" rel="noopener">KubeApp — Il Cubo Logico</a></li>
+        <li>🚀 <a href="https://pezzaliapp.com/#giochi" target="_blank" rel="noopener">pezzaliAPP.com — Cultura Digitale</a></li>
+        <li>📚 eBook e manuali su Amazon Kindle firmati <em>Alessandro Pezzali / Il Quarto Attore</em></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>👤 Autore</h2>
+      <p><strong>Alessandro Pezzali</strong><br/>
+         Fondatore e sviluppatore open-source di <a href="https://pezzaliapp.com" target="_blank" rel="noopener">pezzaliAPP.com</a><br/>
+         Autore di eBook tecnici e noir pubblicati su Amazon Kindle. Appassionato di logica, vintage computing, PWA e cultura digitale.</p>
+      <p>📧 <a href="mailto:info@alessandropezzali.it">info@alessandropezzali.it</a><br/>
+         🌐 <a href="https://www.alessandropezzali.it" target="_blank" rel="noopener">www.alessandropezzali.it</a><br/>
+         🐙 <a href="https://github.com/pezzaliapp" target="_blank" rel="noopener">github.com/pezzaliapp</a></p>
+    </section>
+
+    <section>
+      <h2>⚖️ Licenza</h2>
+      <p><strong>MIT License</strong><br/>
+         © 2025 — Alessandro Pezzali / PezzaliAPP</p>
+      <p>Il codice può essere riutilizzato liberamente per scopi didattici e sperimentali, citando la fonte.
+         Non è consentita la rivendita commerciale senza autorizzazione esplicita.</p>
+    </section>
+
+    <section>
+      <h2>❤️ Ringraziamenti</h2>
+      <p>Grazie a chi sostiene la filosofia <em>no-cloud, no-cost, open-source</em>. Lift Runner è dedicato a chi crede che la programmazione possa ancora essere un atto poetico.</p>
+      <blockquote>
+        “Ogni riga di codice è una decisione. E ogni decisione, se fatta con coraggio, diventa un salto di livello.”<br>
+        — <em>Alessandro Pezzali</em>
+      </blockquote>
+    </section>
+
+    <p class="foot">Documento HTML generato per la pagina README — Lift Runner · PezzaliAPP</p>
+  </main>
+
+</body>
+</html>
