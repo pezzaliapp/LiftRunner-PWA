@@ -1,12 +1,12 @@
-/* Lift Runner — v3.7 (full)
- * Keep (da v3.5):
- * - Stages, Turbo bar, Bonus/Combo, Tumbleweed (bush), UFO, Ghost Lift, NPC family, Shield, D-pad mobile
- * New:
- * - Salto (asse Z) con fisica semplice
- * - Pneumatici rotolanti + “drop” dall’alto (saltabili)
- * - A o L = azione intelligente (LIFT se pronto, altrimenti JUMP)
- * - B = TURBO (hold) — invariato
- * - X = JUMP forzato
+/* Lift Runner — v3.8
+ * Fix & New:
+ * - JUMP fisico (arco verso l'alto), cooldown, invulnerabilità parziale sugli ostacoli bassi
+ * - Bottone HUD "LIFT" -> JUMP (il lift resta su A e tasto L)
+ * - Nessun testo "JUMP" nel canvas
+ * - A=LIFT, B=TURBO (hold), d-pad DOM su mobile
+ * Keep (da v3.x):
+ * - Shield (pickup raro ~1/min, dura 15s o 1 urto), Ghost Lift, Bonus/Combo, Turbo bar,
+ *   Stages, Tumbleweed (bush), UFO, NPC "family" lift (game over), PWA friendly
  */
 
 (() => {
@@ -17,14 +17,13 @@
 
   const timeEl  = document.getElementById('time');
   const scoreEl = document.getElementById('score');
-  const liftBtn = document.getElementById('liftBtn');
+  const liftBtn = document.getElementById('liftBtn');   // (riusato come JUMP)
   const pauseBtn= document.getElementById('pauseBtn');
   const wrap    = document.getElementById('gamewrap');
 
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   canvas.style.touchAction = 'none';
-  canvas.tabIndex = 0;
-  const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
+  canvas.tabIndex = 0; const focusCanvas = ()=>{ try{ canvas.focus(); }catch{} };
   window.addEventListener('load', focusCanvas);
   canvas.addEventListener('pointerdown', focusCanvas);
 
@@ -35,10 +34,6 @@
   const roadH  = 12;
   const BASE_SCROLL = 3.0;
 
-  // Salto fisica
-  const GRAVITY  = 0.85;   // accel. Z
-  const JUMP_VEL = 10.5;   // v0 salto
-
   const player = {
     x: 120, y: levelY.low - 2*laneGap,
     w: 50, h: 24, vx: 0,
@@ -46,16 +41,17 @@
     level: 'low', lane: 1,
     alive: true, lifting: false,
     turboOn: false,
-    shieldTime: 0,      // seconds remaining
+    shieldTime: 0,
     _turboWasOn: false,
-    // salto (asse Z)
-    jumpZ: 0,           // altezza dal suolo (0 = a terra)
-    jumpVy: 0,          // velocità verticale
-    isJumping: false
+
+    // JUMP state (unità pixel / s)
+    jumpZ: 0,            // quota verticale (0 = “a terra” sulla corsia)
+    jumpVy: 0,           // velocità verticale
+    canJump: true,       // true quando è atterrato e non in lift
+    jumpCooldown: 0      // secondi rimanenti
   };
 
   // Entities
-  // obstacles: block (rettangoli rossi), bush (cespuglio rotante)
   const obstacles = []; // {type:'block'|'bush', x,y,w,h,level,lane,speed,theta?,scored?}
   const lifts     = []; // {x,y,w,h,dir:'up'|'down',active,alignedLane,npc?:'family',ghost?:true,blink?:number}
   const bonuses   = []; // {x,y,w,h,level,lane,points,active,ttl}
@@ -63,7 +59,6 @@
   const shields   = []; // {x,y,w,h,level,lane,active,ttl}
   const floats    = []; // {x,y,text,ttl}
   const particles = []; // teleport scia: {x,y,vx,vy,ttl}
-  const tires     = []; // pneumatici: {x,y,r,level,lane,ang,angVel,mode:'roll'|'drop',vy}
 
   // ===== Audio =====
   let actx=null, muted=false;
@@ -111,6 +106,8 @@
   const shieldPickupSound = ()=>{ blip(980,0.08,0.09,'triangle'); setTimeout(()=>blip(640,0.06,0.07,'triangle'),70); };
   const shieldBreakSound  = ()=>{ blip(240,0.08,0.12,'square'); setTimeout(()=>blip(180,0.10,0.10,'square'),60); };
   const whoosh = ()=>{ sweep(300,1200,0.18,0.10); };
+  const jumpSound = ()=>{ blip(700,0.06,0.08,'triangle'); setTimeout(()=>blip(500,0.05,0.06,'triangle'),70); };
+
   ['pointerdown','keydown','touchstart','click'].forEach(t=>{
     window.addEventListener(t, ()=>{ ensureAudio(); actx && actx.resume && actx.resume(); }, {once:true, passive:true});
   });
@@ -153,11 +150,11 @@
       y: yBase - lane*laneGap - 6,
       w: 140, h: 16, dir, active: true, alignedLane: lane
     };
-    // Ghost ≈ 1 su 5, altrimenti 12% NPC family
     if (Math.random() < 0.20) {
-      L.ghost = true;
+      L.ghost = true;   // ~20% ghost
     } else if (Math.random() < 0.12) {
-      L.npc = 'family'; L.blink = 0;
+      L.npc = 'family'; // ~12% family occupato
+      L.blink = 0;
     }
     lifts.push(L);
   }
@@ -184,31 +181,7 @@
     ufoSound();
   }
 
-  // Pneumatici
-  const TIRE_RADIUS = 12, TIRE_SPAWN_PROB = 0.020;
-  function spawnTireRolling(level = (Math.random()<0.5?'low':'high')) {
-    const lane = Math.floor(Math.random()*LANES);
-    const baseY = (level==='low'? levelY.low : levelY.high);
-    tires.push({
-      x: W + 80 + Math.random()*180,
-      y: baseY - lane*laneGap - (TIRE_RADIUS+2),
-      r: TIRE_RADIUS, level, lane,
-      ang: 0, angVel: 0.25 + Math.random()*0.25,
-      mode: 'roll', vy: 0
-    });
-  }
-  function spawnTireDropFromHigh(){
-    const lane = Math.floor(Math.random()*LANES);
-    const yHigh = levelY.high - lane*laneGap - (TIRE_RADIUS+2);
-    const x0    = W + 120 + Math.random()*140;
-    tires.push({
-      x: x0, y: yHigh, r: TIRE_RADIUS, level: 'high', lane,
-      ang: 0, angVel: 0.22 + Math.random()*0.18,
-      mode: 'drop', vy: 0
-    });
-  }
-
-  // Preload
+  // Preload iniziale
   for(let i=0;i<3;i++) spawnObstacle();
   spawnLift('up'); spawnLift('down');
 
@@ -231,25 +204,30 @@
 
   // ===== Keyboard =====
   const keys=Object.create(null);
-  const handled=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Space','KeyL','KeyX','KeyP','KeyR','KeyM']);
+  const handled=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Space','KeyL','KeyP','KeyR','KeyM','KeyX','KeyJ']);
   window.addEventListener('keydown',e=>{
     const c=e.code||e.key; keys[c]=true;
     if(handled.has(c)) e.preventDefault();
     if(!running) startGame();
     if(c==='KeyP') togglePause();
+    if(c==='KeyL') manualLift();       // L = lift
     if(c==='KeyM') muted=!muted;
-    if(c==='Space') { player.turboOn=true; }       // B: turbo
-    if(c==='KeyL' || c==='KeyA') smartAction();    // A/L: lift se pronto, altrimenti jump
-    if(c==='KeyX') doJump();                       // X: jump forzato
+    if(c==='Space') { player.turboOn=true; } // Space = turbo (desktop)
+    if((c==='KeyX' || c==='KeyJ')) tryJump(); // X/J = JUMP (desktop)
     if(c==='KeyR' && !player.alive) toStart();
   },{passive:false});
   window.addEventListener('keyup',e=>{
     const c=e.code||e.key; keys[c]=false;
     if(handled.has(c)) e.preventDefault();
-    if(c==='Space') { player.turboOn=false; }      // fine turbo hold
+    if(c==='Space') { player.turboOn=false; }
   },{passive:false});
 
-  if(liftBtn)  liftBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); smartAction(); if(!running) startGame(); });
+  // HUD buttons
+  if(liftBtn){
+    liftBtn.textContent = 'JUMP';
+    liftBtn.title = 'Salta (X o J su tastiera)';
+    liftBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); tryJump(); if(!running) startGame(); });
+  }
   if(pauseBtn) pauseBtn.addEventListener('click', ()=>{ ensureAudio(); actx&&actx.resume&&actx.resume(); togglePause(); });
 
   // ===== D-pad DOM (mobile) =====
@@ -287,15 +265,16 @@
     const right = document.createElement('div');
     right.className = 'padRight';
     right.innerHTML = `
-      <button id="padA" class="padBtn small" aria-label="Lift o Jump">A</button><span class="padLabel">LIFT</span>
+      <button id="padA" class="padBtn small" aria-label="Lift">A</button><span class="padLabel">LIFT</span>
       <button id="padB" class="padBtn small" aria-label="Turbo">B</button><span class="padLabel">TURBO</span>
+      <button id="padX" class="padBtn small" aria-label="Jump">X</button><span class="padLabel">JUMP</span>
     `;
     bar.appendChild(left); bar.appendChild(right);
     const hud = document.getElementById('hud'); wrap.insertBefore(bar, hud);
 
     const btnUp=bar.querySelector('#padUp'), btnDown=bar.querySelector('#padDown');
     const btnLeft=bar.querySelector('#padLeft'), btnRight=bar.querySelector('#padRight');
-    const btnA=bar.querySelector('#padA'), btnB=bar.querySelector('#padB');
+    const btnA=bar.querySelector('#padA'), btnB=bar.querySelector('#padB'), btnX=bar.querySelector('#padX');
 
     const down = (e)=>{ e.preventDefault(); ensureAudio(); actx&&actx.resume&&actx.resume(); if(!running) startGame(); };
 
@@ -307,23 +286,24 @@
       btnLeft.addEventListener(t, ()=>{ holdLeft=false; }, {passive:true});
       btnRight.addEventListener(t,()=>{ holdRight=false;}, {passive:true});
     });
-    btnA.addEventListener('pointerdown', e=>{ down(e); smartAction(); });
-    btnB.addEventListener('pointerdown', e=>{ down(e); holdTurbo=true; });
+    btnA.addEventListener('pointerdown', e=>{ down(e); manualLift(); });             // A=LIFT
+    btnB.addEventListener('pointerdown', e=>{ down(e); holdTurbo=true; });           // B=TURBO (hold)
     ['pointerup','pointercancel','pointerleave'].forEach(t=>{
       btnB.addEventListener(t, ()=>{ holdTurbo=false; }, {passive:true});
     });
+    btnX.addEventListener('pointerdown', e=>{ down(e); tryJump(); });                // X=JUMP
   }
 
   // ===== Start / Pause =====
   function startGame(){
     running=true; paused=false; last=performance.now(); elapsed=0; score=0;
-    obstacles.length=0; lifts.length=0; bonuses.length=0; ufos.length=0; floats.length=0; shields.length=0; particles.length=0; tires.length=0;
+    obstacles.length=0; lifts.length=0; bonuses.length=0; ufos.length=0; floats.length=0; shields.length=0; particles.length=0;
     for(let i=0;i<3;i++) spawnObstacle();
     spawnLift('up'); spawnLift('down');
     Object.assign(player,{
       x:120, level:'low', lane:1, alive:true, lifting:false,
       turboOn:false, shieldTime:0, _turboWasOn:false,
-      jumpZ:0, jumpVy:0, isJumping:false
+      jumpZ:0, jumpVy:0, canJump:true, jumpCooldown:0
     });
     setStage(1);
     comboCount=0; comboTimer=0; comboFlash=0; turboEnergy=100; shieldSpawnTimer=0; flashTime=0;
@@ -343,48 +323,39 @@
       if(!L.active || L.dir!==need) continue;
       if (player.lane !== L.alignedLane) continue;
       if (player.x + player.w > L.x - LIFT_TOL && player.x < L.x + L.w + LIFT_TOL &&
-          player.y + player.h > L.y && player.y < L.y + L.h) return L;
+          (player.y - player.jumpZ) + player.h > L.y && (player.y - player.jumpZ) < L.y + L.h) return L;
     }
     return null;
   }
-
   function manualLift(){ const L=eligibleLift(); if(L) startLift(L); }
-  function smartAction(){
-    const L=eligibleLift();
-    if (L) startLift(L); else doJump();
-  }
-
-  function doJump(){
-    if (!player.alive || player.lifting || player.isJumping) return;
-    player.isJumping = true;
-    player.jumpVy = -JUMP_VEL;
-    blip(680,0.06,0.07,'triangle');
-  }
 
   function teleportViaGhost(L){
     whoosh(); flashTime = 0.25;
     for(let i=0;i<16;i++){
       particles.push({
-        x: player.x + player.w/2, y: player.y + player.h/2,
+        x: player.x + player.w/2, y: (player.y - player.jumpZ) + player.h/2,
         vx: (Math.random()*80+80), vy: (Math.random()*40-20),
         ttl: 0.25 + Math.random()*0.2
       });
     }
+    // swap level e sposta avanti
     player.level = (player.level==='low') ? 'high' : 'low';
     player.x = Math.min(player.x + 400, W*0.62);
+    // riallinea y al nuovo piano (mantieni salto corrente)
     const base = (player.level==='low')?levelY.low:levelY.high;
     player.y = base - player.lane*laneGap - (player.h/2);
-    score += 200; floats.push({ x: player.x, y: player.y-12, text:'+200 GHOST', ttl:1.2 });
+    score += 200; floats.push({ x: player.x, y: (player.y - player.jumpZ)-12, text:'+200 GHOST', ttl:1.2 });
   }
 
   function startLift(L){
-    // NPC family = game over
+    if (player.jumpZ > 0) return; // niente lift mentre salti
+    // NPC family = game over immediato
     if (L.npc === 'family') {
       L.blink = 0.6; player.alive = false; running = false; crash();
       floats.push({ x: L.x+L.w/2, y: L.y-10, text:'LIFT OCCUPATO!', ttl:1.4 });
       return;
     }
-    // Ghost lift = teletrasporto
+    // Ghost lift = teletrasporto istantaneo
     if (L.ghost) {
       L.active=false; teleportViaGhost(L); return;
     }
@@ -396,24 +367,44 @@
     score += 50; if(scoreEl) scoreEl.textContent = score;
   }
 
+  // ===== Jump =====
+  const JUMP_V0 = -320;     // velocità iniziale (negativa = verso l'alto nello spazio canvas)
+  const GRAVITY = 780;      // accelerazione “in basso”
+  const JUMP_COOLDOWN = 0.35; // s
+
+  function tryJump(){
+    if (!player.alive || player.lifting) return;
+    if (!player.canJump || player.jumpCooldown > 0) return;
+    // avvia salto
+    player.jumpZ = 0;
+    player.jumpVy = JUMP_V0;    // verso l’alto
+    player.canJump = false;
+    player.jumpCooldown = JUMP_COOLDOWN;
+    jumpSound();
+  }
+
   // ===== Helpers =====
   function laneUp(){ if(!player.lifting && player.lane<LANES-1) player.lane++; }
   function laneDown(){ if(!player.lifting && player.lane>0)     player.lane--; }
   function overlapRelaxed(a,b,p){
     return a.x - p < b.x + b.w + p &&
            a.x + a.w + p > b.x - p &&
-           a.y - p < b.y + b.h + p &&
-           a.y + a.h + p > b.y - p;
-  }
-  function circleRectOverlap(cx, cy, r, rect){
-    const rx = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
-    const ry = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
-    const dx = cx - rx, dy = cy - ry;
-    return (dx*dx + dy*dy) <= r*r;
+           (a.y - a.jumpZ) - p < b.y + b.h + p &&
+           (a.y - a.jumpZ) + a.h + p > b.y - p;
   }
 
   // ===== Update =====
   function update(dt){
+    // Jump physics
+    if (player.jumpCooldown > 0) player.jumpCooldown = Math.max(0, player.jumpCooldown - dt);
+    if (player.jumpVy !== 0 || player.jumpZ > 0){
+      player.jumpVy += GRAVITY * dt;              // gravità “tira giù”
+      player.jumpZ = Math.max(0, player.jumpZ - player.jumpVy * dt * 0.001); 
+      // Nota: sottraggo vy*dt*0.001 per trasformare px/s in offset coerente con il frame;
+      // l’importante è che jumpZ cresca salendo e torni a 0 atterrando
+      if (player.jumpZ <= 0){ player.jumpZ = 0; player.jumpVy = 0; player.canJump = true; }
+    }
+
     // Turbo energy
     const wantTurbo = player.turboOn || !!keys['Space'] || (isMobile && holdTurbo);
     if (wantTurbo && turboEnergy > 1) {
@@ -440,7 +431,7 @@
     if((keys['ArrowUp']||keys['KeyW']) && !player.lifting){ laneUp(); keys['ArrowUp']=keys['KeyW']=false; blip(760,0.05,0.06); }
     if((keys['ArrowDown']||keys['KeyS']) && !player.lifting){ laneDown(); keys['ArrowDown']=keys['KeyS']=false; blip(540,0.05,0.06); }
 
-    // Y / lift anim
+    // Y / lift anim (la y “di base” non è influenzata dal salto; il render userà y - jumpZ)
     if(!player.lifting){
       const base=(player.level==='low')?levelY.low:levelY.high;
       const targetY= base - player.lane*laneGap - (player.h/2);
@@ -453,18 +444,8 @@
       if(liftAnim.t>=1){ player.lifting=false; player.level=(player.level==='low')?'high':'low'; liftAnim=null; }
     }
 
-    // Salto (asse Z)
-    if (player.isJumping){
-      player.jumpVy += GRAVITY * dt * 60;
-      player.jumpZ  += player.jumpVy * dt * 60;
-      if (player.jumpZ >= 0){
-        player.jumpZ = 0; player.jumpVy = 0; player.isJumping = false;
-        blip(300,0.04,0.05,'triangle');
-      }
-    }
-
-    // Auto-lift
-    const L=eligibleLift();
+    // Auto-lift (disattivato durante salto)
+    const L= (player.jumpZ>0 ? null : eligibleLift());
     if(L){ if(!eligibleSince) eligibleSince=performance.now(); else if(performance.now()-eligibleSince>=AUTO_LIFT_DELAY) startLift(L); }
     else { eligibleSince=0; }
 
@@ -514,7 +495,7 @@
         comboTimer = COMBO_WINDOW;
         score += points;
         bonusChime(b.points, isX2);
-        floats.push({ x: b.x, y: b.y, text: `+${points}${isX2?' COMBO':''}`, ttl: 1.2 });
+        floats.push({ x: b.x, y: (b.y - player.jumpZ), text: `+${points}${isX2?' COMBO':''}`, ttl: 1.2 });
       }
     }
 
@@ -523,7 +504,7 @@
       s.x -= (BASE_SCROLL + 1.0) * dt * 60; s.ttl -= dt;
       if (s.level === player.level && s.active && overlapRelaxed(player,s,-4)){
         s.active=false; player.shieldTime = 15.0; shieldPickupSound();
-        floats.push({ x:s.x, y:s.y, text:'SHIELD ON', ttl:1.2 });
+        floats.push({ x:s.x, y:(s.y - player.jumpZ), text:'SHIELD ON', ttl:1.2 });
       }
     }
 
@@ -537,22 +518,6 @@
       }
     }
 
-    // Pneumatici update & spawn
-    for (const t of tires){
-      t.x -= (BASE_SCROLL + 1.0 + (turboActive?0.4:0)) * dt * 60;
-      t.ang -= t.angVel * dt * 60;
-      if (t.mode === 'drop'){
-        const targetY = levelY.low - t.lane*laneGap - (t.r+2);
-        t.vy += GRAVITY * 0.9 * dt * 60;
-        t.y  += t.vy * dt * 60;
-        if (t.y >= targetY){
-          t.y = targetY; t.vy=0; t.mode='roll'; t.level='low'; blip(240,0.05,0.07);
-        }
-      }
-    }
-    if (tires.length < 3 && Math.random() < TIRE_SPAWN_PROB) spawnTireRolling();
-    if (Math.random() < 0.003) spawnTireDropFromHigh();
-
     // Update particles (ghost whoosh)
     for (const p of particles){
       p.x += p.vx * dt; p.y += p.vy * dt; p.ttl -= dt; p.vy *= 0.92; p.vx *= 0.94;
@@ -565,17 +530,26 @@
     for(let i=ufos.length-1;i>=0;i--)      if(ufos[i].x + ufos[i].w < -80) ufos.splice(i,1);
     for(let i=shields.length-1;i>=0;i--)   if(shields[i].x + shields[i].w < -60 || shields[i].ttl<=0 || !shields[i].active) shields.splice(i,1);
     for(let i=particles.length-1;i>=0;i--) if(particles[i].ttl<=0) particles.splice(i,1);
-    for(let i=tires.length-1;i>=0;i--)     if(tires[i].x + tires[i].r < -70) tires.splice(i,1);
 
     // Collisioni con ostacoli
     if (player.alive){
       for(const o of obstacles){
         if(o.level!==player.level) continue;
-        const carRect = { x: player.x, y: player.y - player.jumpZ, w: player.w, h: player.h };
-        if(overlapRelaxed(carRect,o,-3)){
+
+        // Se sto saltando abbastanza alto sopra un blocco/tumbleweed, lascio passare
+        const JUMP_CLEARANCE = 14;                  // quanto “spessore” devo superare
+        const jumpingOver = (player.jumpZ > JUMP_CLEARANCE);
+
+        if (jumpingOver){
+          // se sono in overlap X ma alto a sufficienza, ignora
+          const xOverlap = player.x < o.x + o.w && player.x + player.w > o.x;
+          if (xOverlap) continue;
+        }
+
+        if(overlapRelaxed(player,o,-3)){
           if (player.shieldTime > 0){
             player.shieldTime = 0; shieldBreakSound();
-            floats.push({ x: player.x, y: player.y-12, text:'SHIELD!', ttl:1.0 });
+            floats.push({ x: player.x, y: (player.y - player.jumpZ)-12, text:'SHIELD!', ttl:1.0 });
             player.x = Math.max(40, player.x - 20);
             o.x = -9999;
           } else {
@@ -585,28 +559,6 @@
         }
       }
     }
-
-    // Collisioni pneumatici (saltabili)
-    if (player.alive){
-      const carRect = { x: player.x, y: player.y - player.jumpZ, w: player.w, h: player.h };
-      for (const t of tires){
-        if (t.level!==player.level) continue;
-        const jumped = (player.jumpZ > t.r * 0.85);
-        if (!jumped && circleRectOverlap(t.x, t.y, t.r, carRect)){
-          if (player.shieldTime > 0){
-            player.shieldTime = 0; shieldBreakSound();
-            floats.push({ x: player.x, y: player.y-12, text:'SHIELD!', ttl:1.0 });
-            player.x = Math.max(40, player.x - 20);
-          } else {
-            player.alive=false; running=false; crash();
-          }
-          break;
-        }
-      }
-    }
-
-    // HUD bottone LIFT/JUMP
-    if (liftBtn) liftBtn.textContent = eligibleLift() ? 'LIFT ✓' : 'JUMP';
 
     // Score & time + Best
     elapsed += dt;
@@ -642,23 +594,14 @@
     for(const b of bonuses)   drawBonus(b);
     for(const s of shields)   drawShieldPickup(s);
     for(const u of ufos)      drawUFO(u);
-    for(const t of tires)     drawTire(t);
     for(const p of particles) drawParticle(p);
     for(const f of floats)    drawFloat(f);
 
     drawCar(player);
 
-    // Hint sopra l’auto (LIFT READY / JUMP)
-    const el = eligibleLift();
-    if(player.alive && !player.lifting){
-      ctx.save(); ctx.font='bold 14px system-ui,Segoe UI,Arial'; ctx.fillStyle='#eaffef'; ctx.textAlign='center';
-      ctx.fillText(el ? 'LIFT READY' : 'JUMP', player.x + player.w/2, player.y - 12 - player.jumpZ);
-      ctx.restore();
-    }
-
     // HUD in-canvas
     ctx.save();
-    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,230,74);
+    ctx.fillStyle='rgba(8,12,28,0.55)'; ctx.fillRect(10,10,230,86);
     ctx.fillStyle='#ecf2ff'; ctx.font='bold 14px system-ui,Segoe UI,Arial';
     ctx.fillText(`⏱ ${elapsed.toFixed(1)}s`, 16, 28);
     ctx.fillText(`🏁 ${score}`, 16, 46);
@@ -676,6 +619,12 @@
     if (player.shieldTime > 0){
       ctx.fillStyle='#a5f3fc';
       ctx.fillText(`Shield ${player.shieldTime.toFixed(0)}s`, 16, 78);
+    }
+
+    // Jump hint (cooldown)
+    if (!player.canJump || player.jumpCooldown>0){
+      ctx.fillStyle='#fde68a';
+      ctx.fillText(`Jump CD ${player.jumpCooldown.toFixed(1)}s`, 16, 92);
     }
     ctx.restore();
 
@@ -703,8 +652,8 @@
 
     // Overlays
     const tip = isMobile
-      ? 'D-pad sotto • A=LIFT/JUMP • B=TURBO • Shield raro • Ghost lift 👻'
-      : 'Tastiera: ← → • ↑/↓ corsia • A/L=LIFT o JUMP • Spazio=TURBO • Shield • Ghost';
+      ? 'D-pad • A=LIFT • B=TURBO • X=JUMP • Shield • Ghost lift 👻'
+      : '← → • ↑/↓ corsia • L=LIFT • Spazio=TURBO • X/J=JUMP • Shield • Ghost';
     if(!running || paused || !player.alive){
       ctx.fillStyle='rgba(8,12,28,0.72)'; ctx.fillRect(0,0,W,H);
       ctx.fillStyle='#ecf2ff'; ctx.textAlign='center';
@@ -754,9 +703,11 @@
       ctx.fillStyle=L.active?'#2dd36f':'#2a7a54';
     }
     ctx.fillRect(L.x,L.y,L.w,L.h);
+    // piloni
     ctx.fillStyle='#1b254d';
     ctx.fillRect(L.x+6, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
     ctx.fillRect(L.x+L.w-14, levelY.low-4, 8, -(levelY.low - (L.y+L.h)));
+    // direzione
     ctx.fillStyle=isGhost ? '#efe9ff' : '#eaffef';
     const cx=L.x+L.w/2, cy=L.y+L.h/2;
     ctx.beginPath();
@@ -765,6 +716,7 @@
     else { ctx.moveTo(cx,cy+6); ctx.lineTo(cx-6,cy-4); ctx.lineTo(cx+6,cy-4); }
     ctx.closePath(); ctx.fill();
 
+    // NPC family stick-figures
     if (occupied){
       const px = L.x + L.w*0.75, py = L.y - 2;
       ctx.save(); ctx.strokeStyle='#ffe6e6'; ctx.lineWidth=2;
@@ -816,46 +768,18 @@
     for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.arc(i*10, 8, 3, 0, Math.PI*2); ctx.fill(); }
     ctx.restore();
   }
-  function drawTire(t){
-    ctx.save();
-    // ombra
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(t.x, t.y + t.r + 6, t.r*1.1, t.r*0.45, 0, 0, Math.PI*2);
-    ctx.fill(); ctx.restore();
-
-    ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.ang);
-    ctx.fillStyle = '#303a55';
-    ctx.beginPath(); ctx.arc(0,0,t.r,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = '#9fb0d9'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(-t.r+3,0); ctx.lineTo(t.r-3,0); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0,-t.r+3); ctx.lineTo(0,t.r-3); ctx.stroke();
-    ctx.restore();
-  }
   function drawCar(p){
-    // ombra a terra
-    ctx.save();
-    const shadowY = p.y + p.h + 6;
-    const squash = Math.max(0.5, 1 - (p.jumpZ/40));
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(p.x + p.w*0.5, shadowY, (p.w*0.55)*squash, (p.h*0.35)*squash*0.7, 0, 0, Math.PI*2);
-    ctx.fill(); ctx.restore();
-
-    // aura shield
+    const py = p.y - p.jumpZ; // applica quota salto al disegno e alle hitbox
     if (p.shieldTime > 0){
       const a = 0.35 + 0.15*Math.sin(performance.now()/120);
       ctx.save(); ctx.globalAlpha = a; ctx.fillStyle='#93c5fd';
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(p.x-6, p.y-6-p.jumpZ, p.w+12, p.h+12, 10);
-      else ctx.rect(p.x-6, p.y-6-p.jumpZ, p.w+12, p.h+12);
-      ctx.fill(); ctx.restore();
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(p.x-6, py-6, p.w+12, p.h+12, 10); ctx.fill(); }
+      else ctx.fillRect(p.x-6, py-6, p.w+12, p.h+12);
+      ctx.restore();
     }
-
-    const y = p.y - p.jumpZ;
-    ctx.fillStyle=p.alive?'#22c55e':'#7a2b2b'; ctx.fillRect(p.x,y,p.w,p.h);
-    ctx.fillStyle='#cfeee0'; ctx.fillRect(p.x+10,y+4,p.w-20,p.h-10);
-    ctx.fillStyle='#ffe066'; ctx.fillRect(p.x+p.w-6,y+6,4,6);
+    ctx.fillStyle=p.alive?'#22c55e':'#7a2b2b'; ctx.fillRect(p.x,py,p.w,p.h);
+    ctx.fillStyle='#cfeee0'; ctx.fillRect(p.x+10,py+4,p.w-20,p.h-10);
+    ctx.fillStyle='#ffe066'; ctx.fillRect(p.x+p.w-6,py+6,4,6);
   }
   function drawStars(color='#1d2a55'){
     ctx.fillStyle=color;
