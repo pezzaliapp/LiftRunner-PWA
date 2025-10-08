@@ -1,12 +1,18 @@
-// sw.js — Lift Runner (v2) cache-first, aggiornata 2025-10-07
-// Differenze: cache aggiornata, forza reload su update
+// sw.js — Lift Runner v2.1 (2025-10-08)
+// Cache-first + auto-reload su update + icone aggiunte
 
-const CACHE = 'lift-runner-v2';
+const CACHE = 'lift-runner-v2.1';
 const ASSETS = [
   './',
   './index.html',
   './app.js',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-192-maskable.png',
+  './icons/icon-512-maskable.png',
+  './icons/pezzaliAPP-logo.png',
+  './icons/kubeapp-icon.png'
 ];
 
 // ===== Install =====
@@ -27,6 +33,7 @@ self.addEventListener('activate', e => {
       )
       .then(() => self.clients.claim())
   );
+  console.log('[SW] Active:', CACHE);
 });
 
 // ===== Fetch (cache-first) =====
@@ -39,8 +46,7 @@ self.addEventListener('fetch', e => {
   }
 });
 
-// ===== Auto-update check (opzionale) =====
-// Questo forza l’aggiornamento del SW se trovi una nuova versione del file
+// ===== Auto-update on new SW =====
 self.addEventListener('message', e => {
   if (e.data && e.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
