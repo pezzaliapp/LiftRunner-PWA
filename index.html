@@ -4,21 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <title>Lift Runner — PWA Prototype</title>
-
-  <!-- Tema & PWA -->
   <meta name="theme-color" content="#0f172a">
   <link rel="manifest" href="./manifest.webmanifest">
-
-  <!-- iOS: installabile a schermo intero + icona -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Lift Runner">
-  <link rel="apple-touch-icon" href="./icons/icon-192.png">
-
-  <!-- Favicon desktop (opzionale ma utile) -->
-  <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-192.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="./icons/icon-192.png">
-
   <style>
     :root{
       --bg:#0b1022; --card:#111735; --ink:#ecf2ff; --muted:#9fb0d9; --acc:#22c55e; --danger:#ef4444;
@@ -41,12 +28,21 @@
     footer{color:var(--muted); font-size:13px}
     .btn{appearance:none; border:1px solid #254; background:#173; color:#eaffef; border-radius:8px; padding:6px 10px; cursor:pointer}
     .btn:active{transform:translateY(1px)}
+
+    /* ===== Mobile compact (iPhone SE & simili) ===== */
+    @media (max-width: 440px) {
+      header { padding:10px 12px }
+      header p { display:none }         /* Nasconde le istruzioni */
+      body { padding:10px }
+      #hud { font-size:13px; padding:8px 10px }
+      footer { font-size:12px }
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>🚗 Lift Runner — Prototipo</h1>
-    <p>
+    <p id="intro">
       Evita gli ostacoli, allinea l’auto su un <strong>sollevatore</strong> e premi <kbd>L</kbd> (o tocca “LIFT”) per salire al piano superiore.<br>
       Comandi: <kbd>←</kbd><kbd>→</kbd> sposta, <kbd>↑</kbd>/<kbd>↓</kbd> cambia corsia, <kbd>Spazio</kbd> turbo.
     </p>
@@ -65,23 +61,17 @@
 
   <footer>PWA: offline-ready. Installa dalla barra del browser (Aggiungi alla Home).</footer>
 
-  <!-- PWA SW registration & auto-update -->
   <script>
+    // --- PWA SW registration & auto-update
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').then(reg => {
-          // nuova versione? applica subito
-          if (reg.waiting) {
-            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-            window.location.reload();
-          }
+          if (reg.waiting) { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); location.reload(); }
           reg.addEventListener('updatefound', () => {
             const nw = reg.installing;
-            if (!nw) return;
-            nw.addEventListener('statechange', () => {
+            if (nw) nw.addEventListener('statechange', () => {
               if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-                nw.postMessage({ type: 'SKIP_WAITING' });
-                window.location.reload();
+                nw.postMessage({ type: 'SKIP_WAITING' }); location.reload();
               }
             });
           });
@@ -89,7 +79,6 @@
       });
     }
   </script>
-
   <script src="./app.js"></script>
 </body>
 </html>
